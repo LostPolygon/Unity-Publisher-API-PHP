@@ -18,3 +18,5 @@ Not implemented:
 * Viewing/saving publisher info
 
 Licensed under Apache 2.0.
+
+Any questions/ideas? Write to contact@lostpolygon.com
