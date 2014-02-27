@@ -91,7 +91,8 @@
 <tr><th>Package</th><th>Price ($)</th><th>Qty</th><th>Refunds</th><th>Chargebacks</th><th>Gross ($)</th><th>First</th><th>Last</th></tr>
 <?php
     foreach ($sales->GetAssetSales() as $value) {
-        echo sprintf('<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>', 
+        echo sprintf('<tr><td><a href="%s">%s</a></td><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>', 
+                     $value->GetShortUrl(),
                      $value->GetAssetName(),
                      $value->GetPrice(),
                      $value->GetQuantity(),
@@ -107,17 +108,66 @@
 
 <h2>Revenue</h2>
 <table>
-<tr><th>Date</th><th>Description</th><th>Debet ($)</th><th>Credit ($)</th><th>Balance ($)</th></tr>
+<tr><th>Date</th><th>Type</th><th>Description</th><th>Debet ($)</th><th>Credit ($)</th><th>Balance ($)</th></tr>
 <?php
     $revenue = $store->FetchRevenue();
 
     foreach ($revenue as $value) {
-        echo sprintf('<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>', 
-                     date('F Y', $value->GetDate()), 
+        switch ($value->GetInfoType()) {
+            case AssetStore\RevenueInfo::TypeRevenue:
+                $infoType = 'Revenue';
+                break;
+            case AssetStore\RevenueInfo::TypePayout:
+                $infoType = 'Payout';
+                break;
+            default:
+                $infoType = 'Unknown';
+                break;
+        }
+        echo sprintf('<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>', 
+                     date('d F Y', $value->GetDate()), 
+                     $infoType,
                      $value->GetDescription(),
                      $value->GetDebet(),
                      $value->GetCredit(),
                      $value->GetBalance() == 0 ? null : $value->GetBalance()
+                     );
+    }
+?>
+</table>
+
+<h2>Pending</h2>
+<table>
+<tr><th>Package</th><th>Status</th><th>Size</th><th>Updated</th></tr>
+<?php
+    $pending = $store->FetchPending();
+
+    foreach ($pending as $value) {
+        switch ($value->GetStatus()) {
+            case AssetStore\PendingInfo::StatusDraft:
+                $infoType = 'Draft';
+                break;
+            case AssetStore\PendingInfo::StatusPending:
+                $infoType = 'Pending';
+                break;
+            case AssetStore\PendingInfo::StatusDeclined:
+                $infoType = 'Declined';
+                break;
+            case AssetStore\PendingInfo::StatusError:
+                $infoType = 'Error';
+                break;
+            default:
+                $infoType = 'Unknown';
+                break;
+        }
+
+        $size = $value->GetPackageSize();
+
+        echo sprintf('<tr><td>%s</td><td>%s</td><td>%s kB</td><td>%s</td></tr>', 
+                     $value->GetAssetName(), 
+                     $infoType,
+                     $size / 1000,
+                     date('d F Y', $value->GetUpdateDate())
                      );
     }
 ?>

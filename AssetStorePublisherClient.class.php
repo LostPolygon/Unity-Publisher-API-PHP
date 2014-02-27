@@ -11,6 +11,7 @@ class Client {
     const SALES_JSON_URL = 'https://publisher.assetstore.unity3d.com/api/publisher-info/sales/{publisher_id}/{year}{month}.json';
     const INVOICE_VERIFY_JSON_URL = 'https://publisher.assetstore.unity3d.com/api/publisher-info/verify-invoice/{publisher_id}/{invoice_id}.json';
     const REVENUE_JSON_URL = 'https://publisher.assetstore.unity3d.com/api/publisher-info/revenue/{publisher_id}.json';
+    const PENDING_JSON_URL = 'https://publisher.assetstore.unity3d.com/api/publisher-info/pending/{publisher_id}.json';
     const LOGIN_TOKEN = '26c4202eb475d02864b40827dfff11a14657aa41';
     const USER_AGENT = 'Mozilla/5.0 (Windows NT 6.3; rv:27.0) Gecko/20100101 Firefox/27.0';
 
@@ -21,12 +22,16 @@ class Client {
     private $publisherInfoOverview = null;
 
     public function LoginWithToken($token) {
+        $this->AssertIsNotLoggedIn();
+
         $this->loginToken = $token;
         $this->isLoggedIn = true;
         $this->cookies['xunitysession'] = $this->GetXUnitySessionCookie();
     }
 
     public function Login($user, $password) {
+        $this->AssertIsNotLoggedIn();
+
         $token = $this->GetLoginToken($user, $password);
         $this->LoginWithToken($token);
 
@@ -43,6 +48,11 @@ class Client {
         $this->userInfoOverview = null;
         $this->publisherInfoOverview = null;
         $this->isLoggedIn = false;
+    }
+
+
+    public function IsLoggedIn() {
+        return $this->isLoggedIn;
     }
 
     public function GetUserInfo() {
@@ -65,20 +75,8 @@ class Client {
             $result = $this->GetSimpleData(Array('url' => self::PUBLISHER_OVERVIEW_JSON_URL));
             self::AssertHttpCode('Fetching publisher data failed, error code {code}', $result['http_code']);
     
-            $publisherInfoObject = json_decode($result['data'])->overview;
-            $this->publisherInfoOverview = new PublisherInfo(Array(
-                                                                'id' => $publisherInfoObject->id,
-                                                                'name' => $publisherInfoObject->name,
-                                                                'description' => $publisherInfoObject->description,
-                                                                'rating' => $publisherInfoObject->rating->average,
-                                                                'ratingCount' => $publisherInfoObject->rating->count,
-                                                                'payoutCut' => $publisherInfoObject->payout_cut,
-                                                                'publisherUrl' => $publisherInfoObject->long_url,
-                                                                'publisherShortUrl' => $publisherInfoObject->short_url,
-                                                                'siteUrl' => $publisherInfoObject->url,
-                                                                'supportUrl' => $publisherInfoObject->support_url,
-                                                                'supportEmail' => $publisherInfoObject->support_email
-                                                            ));
+            $publisherInfoObject = json_decode($result['data']);
+            $this->publisherInfoOverview = new PublisherInfo($publisherInfoObject);
         }
 
         return $this->publisherInfoOverview;
@@ -95,9 +93,7 @@ class Client {
 
         $infoArray = Array();
         foreach ($salesPeriods->periods as $value) {
-            $year = substr($value->value, 0, 4);
-            $month = substr($value->value, 4, 2);
-            $infoArray[] = new SalesPeriod((int)$year, (int)$month);
+            $infoArray[] = new SalesPeriod($value);
         }
 
         return $infoArray;
@@ -114,15 +110,24 @@ class Client {
 
         $infoArray = Array();
         foreach ($infoObject->aaData as $value) {
-            $infoObjectArray = Array(
-                'date' => self::ParseDate($value[0]),
-                'description' => $value[1],
-                'debet' => self::ParseCurrency($value[2]),
-                'credit' => self::ParseCurrency($value[3]),
-                'balance' => self::ParseCurrency($value[4]),
-            );
+            $infoArray[] = new RevenueInfo($value);
+        }
 
-            $infoArray[] = new RevenueInfo($infoObjectArray);
+        return $infoArray;
+    }
+
+    public function FetchPending() {
+        $this->AssertIsLoggedIn();
+
+        $url = str_replace('{publisher_id}', $this->GetPublisherInfo()->GetId(), self::PENDING_JSON_URL);
+        $result = $this->GetSimpleData(Array('url' => $url));
+        self::AssertHttpCode('Fetching pending packages failed, error code {code}', $result['http_code']);
+
+        $infoObject = json_decode($result['data']);
+
+        $infoArray = Array();
+        foreach ($infoObject->aaData as $value) {
+            $infoArray[] = new PendingInfo($value);
         }
 
         return $infoArray;
@@ -134,7 +139,6 @@ class Client {
         if (!is_array($invoiceNumbers)) {
             $invoiceNumbers = Array($invoiceNumbers);
         }
-
         foreach ($invoiceNumbers as &$value) {
             $value = preg_replace('#[^0-9]#', '', $value);
         }
@@ -142,7 +146,7 @@ class Client {
 
         $invoiceNumbers = implode(' ', $invoiceNumbers);
   
-        $url = str_replace(Array('{publisher_id}', '{invoice_id}'), 
+        $url = str_replace(Array('{publisher_id}', '{invoice_id}'),
                            Array($this->GetPublisherInfo()->GetId(), urlencode($invoiceNumbers)), 
                            self::INVOICE_VERIFY_JSON_URL);
         $result = $this->GetSimpleData(Array('url' => $url));
@@ -152,14 +156,7 @@ class Client {
 
         $invoiceInfo = Array();
         foreach ($invoiceInfoObject->aaData as $value) {
-            $invoiceInfoArray = Array(
-                'id' => $value[0],
-                'assetName' => $value[1],
-                'date' => self::ParseDate($value[2]),
-                'isRefunded' => $value[3] !== 'No',
-            );
-
-            $invoiceInfo[] = new InvoiceInfo($invoiceInfoArray);
+            $invoiceInfo[] = new InvoiceInfo($value);
         }
 
         return $invoiceInfo;
@@ -168,10 +165,12 @@ class Client {
     public function FetchSales($year, $month) {
         $this->AssertIsLoggedIn();
 
+        $year = (int) $year;
+        $month = (int) $month;
+
         if ($year < 2010) {
             throw new AssetStoreException('Year must be after 2009');
         }
-
         if ($month > 12 || $month < 1) {
             throw new AssetStoreException('Month must be an integer between 1 and 12');
         }
@@ -187,19 +186,8 @@ class Client {
         $salesInfo = Array();
 
         foreach ($salesInfoObject->aaData as $key => $value) {
-            $salesInfoArray = Array(
-                'name' => $value[0],
-                'price' => self::ParseCurrency($value[1]),
-                'quantity' => $value[2] != null ? (int) $value[2] : null,
-                'refunds' => $value[3] != null ? abs((int) $value[3]) : null,
-                'chargebacks' => $value[4] != null ? abs((int) $value[4]) : null,
-                'gross' => $value[5] != null ? self::ParseCurrency($value[5]) : null,
-                'firstPurchase' => $value[6] != null ? self::ParseDate($value[6]) : null,
-                'lastPurchase' => $value[7] != null ? self::ParseDate($value[7]) : null,
-                'shortLink' => $salesInfoObject->result[$key]->short_url,
-            );
-
-            $salesInfo[] = new AssetSalesInfo($salesInfoArray);
+            $value['shortLink'] = $salesInfoObject->result[$key]->short_url;
+            $salesInfo[] = new AssetSalesInfo($value);
         }
 
         return new PeriodSalesInfo($salesInfo, $this->GetPublisherInfo()->GetPayoutCut());
@@ -272,26 +260,38 @@ class Client {
         return trim($result_data);
     }
 
-    private static function AssertHttpCode($message, $code, $expectedCode = 200) {
-        if ($code != $expectedCode) {
-            throw new AssetStoreException(str_replace('{code}', $code, $message));
+    private static function AssertHttpCode($message, $code) {
+        if (HttpErrorCodes::IsErrorCode($code)) {
+            throw new AssetStoreException(str_replace('{code}', $code . ' (' . HttpErrorCodes::GetStatusMessage($code) . ')', $message));
         }
     }
-
+  
     private function AssertIsLoggedIn() {
-        if (!$this->isLoggedIn) {
+        if (!$this->IsLoggedIn()) {
             throw new AssetStoreException('Can\'t execute operation when not logged in');
         }
     }
 
-    private static function ParseDate($date) {
+    private function AssertIsNotLoggedIn() {
+        if ($this->IsLoggedIn()) {
+            throw new AssetStoreException('Login already performed');
+        }
+    }
+}
+
+class AssetStoreException extends \Exception { }
+
+class ParsedData {
+    protected $data = Array();
+
+    protected static function ParseDate($date) {
         if(empty($date))
             return null;
 
         return \DateTime::createFromFormat('Y-m-d', $date)->getTimestamp();
     }
 
-    private static function ParseCurrency($value) {
+    protected static function ParseCurrency($value) {
         if(empty($value))
             return null;
 
@@ -299,16 +299,24 @@ class Client {
     }
 }
 
-class AssetStoreException extends \Exception { }
-
-class ParsedData {
-    protected $data;
-    function __construct($data) {
-        $this->data = $data;
-    }
-}
-
 class PublisherInfo extends ParsedData {
+    function __construct($data) {
+        $data = $data->overview;
+        $this->data = Array(
+                            'id' => (int) $data->id,
+                            'name' => $data->name,
+                            'description' => $data->description,
+                            'rating' => (int) $data->rating->average,
+                            'ratingCount' => (int) $data->rating->count,
+                            'payoutCut' => $data->payout_cut,
+                            'publisherUrl' => $data->long_url,
+                            'publisherShortUrl' => $data->short_url,
+                            'siteUrl' => $data->url,
+                            'supportUrl' => $data->support_url,
+                            'supportEmail' => $data->support_email
+                            );
+    }
+
     public function GetId() {
         return $this->data['id'];
     }
@@ -355,6 +363,28 @@ class PublisherInfo extends ParsedData {
 }
 
 class RevenueInfo extends ParsedData {
+    const TypeUnknown = -1;
+    const TypeRevenue = 1;
+    const TypePayout = 2;
+
+    function __construct($data) {
+        $infoType = self::TypeUnknown;
+        if (stripos($data[1], 'revenue') !== false) {
+            $infoType = self::TypeRevenue;
+        } elseif (stripos($data[1], 'payout') !== false) {
+            $infoType = self::TypePayout;
+        }
+
+        $this->data = Array(
+            'date' => self::ParseDate($data[0]),
+            'description' => $data[1],
+            'debet' => self::ParseCurrency($data[2]),
+            'credit' => self::ParseCurrency($data[3]),
+            'balance' => self::ParseCurrency($data[4]),
+            'infoType' => $infoType
+        );
+    }
+
     public function GetDate() {
         return $this->data['date'];
     }
@@ -374,9 +404,22 @@ class RevenueInfo extends ParsedData {
     public function GetBalance() {
         return $this->data['balance'];
     }
+
+    public function GetInfoType() {
+        return $this->data['infoType'];
+    }
 }
 
 class InvoiceInfo extends ParsedData {
+    function __construct($data) {
+        $this->data = Array(
+            'id' => $data[0],
+            'assetName' => $data[1],
+            'date' => self::ParseDate($data[2]),
+            'isRefunded' => $data[3] === 'Yes',
+        );
+    }
+
     public function GetInvoiceNumber() {
         return $this->data['id'];
     }
@@ -398,9 +441,9 @@ class SalesPeriod {
     private $year;
     private $month;
 
-    function __construct($year, $month) {
-        $this->year = (int) $year;
-        $this->month = (int) $month;
+    function __construct($data) {
+        $this->year = (int) (int) substr($data->value, 0, 4);
+        $this->month = (int) (int) substr($data->value, 4, 2);
     }
 
     public function GetYear() {
@@ -454,6 +497,20 @@ class PeriodSalesInfo {
 }
 
 class AssetSalesInfo extends ParsedData {
+    function __construct($data) {
+        $this->data = Array(
+            'name' => $data[0],
+            'price' => self::ParseCurrency($data[1]),
+            'quantity' => $data[2] != null ? (int) $data[2] : null,
+            'refunds' => $data[3] != null ? abs((int) $data[3]) : null,
+            'chargebacks' => $data[4] != null ? abs((int) $data[4]) : null,
+            'gross' => $data[5] != null ? self::ParseCurrency($data[5]) : null,
+            'firstPurchase' => $data[6] != null ? self::ParseDate($data[6]) : null,
+            'lastPurchase' => $data[7] != null ? self::ParseDate($data[7]) : null,
+            'shortLink' => $data['shortLink'],
+        );
+    }
+
     public function GetAssetName() {
         return $this->data['name'];
     }
@@ -486,7 +543,7 @@ class AssetSalesInfo extends ParsedData {
         return $this->data['lastPurchase'];
     }
 
-    public function GetShortLink() {
+    public function GetShortUrl() {
         return $this->data['shortLink'];
     }
 
@@ -517,8 +574,8 @@ class AssetSalesInfo extends ParsedData {
         while(!feof($sock)) $response .= fread($sock, 8192);
         fclose($sock);
      
-        if (preg_match('/^Location: (.+?)$/m', $response, $matches)){
-            if ( substr($matches[1], 0, 1) == "/" )
+        if (preg_match('/^Location: (.+?)$/m', $response, $matches)) {
+            if (substr($matches[1], 0, 1) == "/")
                 return $url_parts['scheme'] . "://" . $url_parts['host'] . trim($matches[1]);
             else
                 return trim($matches[1]);
@@ -528,4 +585,126 @@ class AssetSalesInfo extends ParsedData {
         }
     }
 }
+
+class PendingInfo extends ParsedData {
+    const StatusUnknown = -1;
+    const StatusError = 1;
+    const StatusDraft = 2;
+    const StatusPending = 3;
+    const StatusDeclined = 4;
+
+    private $status;
+
+    function __construct($data) {
+        $status = self::StatusUnknown;
+        $size = $data[1];
+        $status = $data[2];
+
+        // Parse status
+        if (stripos($status, 'pending') !== false) {
+            $status = self::StatusPending;
+        } elseif (stripos($status, 'declined') !== false) {
+            $status = self::StatusDeclined;
+        } elseif (stripos($status, 'draft') !== false) {
+            $status = self::StatusDraft;
+        } elseif (stripos($status, 'error') !== false) {
+            $status = self::StatusError;
+        }
+
+        // Parse size
+        $sizeExplode = explode(' ', $size);
+        $size = (float) $sizeExplode[0];
+        if ($sizeExplode[1] === 'GB') {
+            $size *= 1000 * 1000;
+        } elseif ($sizeExplode[1] === 'MB') {
+            $size *= 1000;
+        }
+
+        $size = (int) ($size * 1000); // to bytes
+
+        $this->data = Array(
+            'name' => $data[0],
+            'packageSize' => $size,
+            'status' => $status,
+            'updateDate' => self::ParseDate($data[3])
+        );
+    }
+
+    public function GetAssetName() {
+        return $this->data['name'];
+    }
+
+    public function GetPackageSize() {
+        return $this->data['packageSize'];
+    }
+
+    public function GetStatus() {
+        return $this->data['status'];
+    }
+
+    public function GetUpdateDate() {
+        return $this->data['updateDate'];
+    }
+}
+
+class HttpErrorCodes {
+    private static $messages = Array(
+        // [Informational 1xx]    
+        100 => 'Continue',    
+        101 => 'Switching Protocols',    
+        // [Successful 2xx]    
+        200 => 'OK',    
+        201 => 'Created',    
+        202 => 'Accepted',    
+        203 => 'Non-Authoritative Information',    
+        204 => 'No Content',    
+        205 => 'Reset Content',    
+        206 => 'Partial Content',    
+        // [Redirection 3xx]    
+        300 => 'Multiple Choices',    
+        301 => 'Moved Permanently',    
+        302 => 'Found',    
+        303 => 'See Other',    
+        304 => 'Not Modified',    
+        305 => 'Use Proxy',    
+        306 => '(Unused)',    
+        307 => 'Temporary Redirect',    
+        // [Client Error 4xx]    
+        400 => 'Bad Request',    
+        401 => 'Unauthorized',    
+        402 => 'Payment Required',    
+        403 => 'Forbidden',    
+        404 => 'Not Found',    
+        405 => 'Method Not Allowed',    
+        406 => 'Not Acceptable',    
+        407 => 'Proxy Authentication Required',    
+        408 => 'Request Timeout',    
+        409 => 'Conflict',    
+        410 => 'Gone',    
+        411 => 'Length Required',    
+        412 => 'Precondition Failed',    
+        413 => 'Request Entity Too Large',    
+        414 => 'Request-URI Too Long',    
+        415 => 'Unsupported Media Type',    
+        416 => 'Requested Range Not Satisfiable',    
+        417 => 'Expectation Failed',    
+        // [Server Error 5xx]    
+        500 => 'Internal Server Error',    
+        501 => 'Not Implemented',    
+        502 => 'Bad Gateway',    
+        503 => 'Service Unavailable',    
+        504 => 'Gateway Timeout',    
+        505 => 'HTTP Version Not Supported'
+    );
+
+    public static function IsErrorCode($code) {
+        // Error codes begin at 400
+        return is_numeric($code) && $code >= 400;
+    }
+
+    public static function GetStatusMessage($code) {
+        return self::$messages[$code];
+    }
+}
+
 ?>
