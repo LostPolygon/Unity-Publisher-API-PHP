@@ -281,7 +281,7 @@ class Client {
 
 class AssetStoreException extends \Exception { }
 
-class ParsedData {
+abstract class ParsedData {
     protected $data = Array();
 
     protected static function ParseDate($date) {
@@ -299,7 +299,52 @@ class ParsedData {
     }
 }
 
+trait ConvertableObject {
+    public function ToArray() {
+        return self::ObjectToArray($this);
+    }
+
+    // Based on
+    // http://blog.republicofone.com/2009/08/php-json-object-reflection-recursion/
+    protected static function ObjectToArray($object) {
+        $reflected = new \ReflectionClass($object);
+        $data = Array();
+    
+        $methods = $reflected->getMethods();
+        foreach ($methods as $method) {
+            if (strpos($method->name, "Get") !== 0 || !$method->isPublic() || $method->isStatic())
+                continue;
+
+            $name = substr($method->name, 3);
+            $name[0] = strtolower($name[0]);
+            $value = $method->invoke($object);
+            $valueType = gettype($value);
+    
+            switch ($valueType) {
+                case 'object':
+                    $value = self::ObjectToArray($value);
+                    break;
+                
+                case 'array':
+                    $valueArray = Array();
+                    foreach($value as $arrayElement){
+                        $valueArray[] = self::ObjectToArray($arrayElement);
+                    }
+    
+                    $value = $valueArray;
+                    break;
+            }
+    
+            $data[$name] = $value;
+        }
+    
+        return $data;
+    }
+}
+
 class PublisherInfo extends ParsedData {
+    use ConvertableObject;
+
     function __construct($data) {
         $data = $data->overview;
         $this->data = Array(
@@ -363,6 +408,8 @@ class PublisherInfo extends ParsedData {
 }
 
 class RevenueInfo extends ParsedData {
+    use ConvertableObject;
+
     const TypeUnknown = -1;
     const TypeRevenue = 1;
     const TypePayout = 2;
@@ -411,6 +458,8 @@ class RevenueInfo extends ParsedData {
 }
 
 class InvoiceInfo extends ParsedData {
+    use ConvertableObject;
+
     function __construct($data) {
         $this->data = Array(
             'id' => $data[0],
@@ -438,6 +487,8 @@ class InvoiceInfo extends ParsedData {
 }
 
 class SalesPeriod {
+    use ConvertableObject;
+
     private $year;
     private $month;
 
@@ -460,6 +511,8 @@ class SalesPeriod {
 }
 
 class PeriodSalesInfo {
+    use ConvertableObject;
+
     private $assetSales;
     private $revenueGross;
     private $revenueNet;
@@ -497,6 +550,8 @@ class PeriodSalesInfo {
 }
 
 class AssetSalesInfo extends ParsedData {
+    use ConvertableObject;
+
     function __construct($data) {
         $this->data = Array(
             'name' => $data[0],
@@ -555,7 +610,7 @@ class AssetSalesInfo extends ParsedData {
     }
 
     // http://w-shadow.com/blog/2008/07/05/how-to-get-redirect-url-in-php/
-    static function GetRedirectUrl($url) {
+    private static function GetRedirectUrl($url) {
         $redirect_url = null;
      
         $url_parts = @parse_url($url);
@@ -587,6 +642,8 @@ class AssetSalesInfo extends ParsedData {
 }
 
 class PendingInfo extends ParsedData {
+    use ConvertableObject;
+
     const StatusUnknown = -1;
     const StatusError = 1;
     const StatusDraft = 2;
