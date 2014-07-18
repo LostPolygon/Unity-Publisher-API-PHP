@@ -11,9 +11,9 @@ Implemented:
 * Invoice verification
 * Viewing pending assets list
 * Retrieving revenue summary (from "Revenue" tab)
+* Viewing free downloads stats
 
 Not implemented:
-* Viewing free downloads stats
 * Users management
 * Viewing/saving payout credentials
 * Viewing/saving publisher info

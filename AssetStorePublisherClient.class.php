@@ -9,6 +9,7 @@ class Client {
     const PUBLISHER_OVERVIEW_JSON_URL = 'https://publisher.assetstore.unity3d.com/api/publisher/overview.json';
     const SALES_PERIODS_JSON_URL = 'https://publisher.assetstore.unity3d.com/api/publisher-info/sales-periods/{publisher_id}.json';
     const SALES_JSON_URL = 'https://publisher.assetstore.unity3d.com/api/publisher-info/sales/{publisher_id}/{year}{month}.json';
+    const DOWNLOADS_JSON_URL = 'https://publisher.assetstore.unity3d.com/api/publisher-info/downloads/{publisher_id}/{year}{month}.json';
     const INVOICE_VERIFY_JSON_URL = 'https://publisher.assetstore.unity3d.com/api/publisher-info/verify-invoice/{publisher_id}/{invoice_id}.json';
     const REVENUE_JSON_URL = 'https://publisher.assetstore.unity3d.com/api/publisher-info/revenue/{publisher_id}.json';
     const PENDING_JSON_URL = 'https://publisher.assetstore.unity3d.com/api/publisher-info/pending/{publisher_id}.json';
@@ -191,6 +192,37 @@ class Client {
         }
 
         return new PeriodSalesInfo($salesInfo, $this->GetPublisherInfo()->GetPayoutCut());
+    }
+
+    public function FetchDownloads($year, $month) {
+        $this->AssertIsLoggedIn();
+
+        $year = (int) $year;
+        $month = (int) $month;
+
+        if ($year < 2010) {
+            throw new AssetStoreException('Year must be after 2009');
+        }
+        if ($month > 12 || $month < 1) {
+            throw new AssetStoreException('Month must be an integer between 1 and 12');
+        }
+
+        $month = str_pad($month, 2, '0', STR_PAD_LEFT);
+        $url = str_replace(Array('{publisher_id}', '{year}', '{month}'), 
+                           Array($this->GetPublisherInfo()->GetId(), $year, $month), 
+                           self::DOWNLOADS_JSON_URL);
+        $result = $this->GetSimpleData(Array('url' => $url));
+        self::AssertHttpCode('Fetching downloads failed, error code {code}', $result['http_code']);
+
+        $downloadsInfoObject = json_decode($result['data']);
+        $downloadsInfo = Array();
+
+        foreach ($downloadsInfoObject->aaData as $key => $value) {
+            $value['shortLink'] = $downloadsInfoObject->result[$key]->short_url;
+            $downloadsInfo[] = new AssetDownloadsInfo($value);
+        }
+
+        return new PeriodDownloadsInfo($downloadsInfo);
     }
 
     private function SetupCurlQuery($params) {
@@ -549,6 +581,20 @@ class PeriodSalesInfo {
     }
 }
 
+class PeriodDownloadsInfo {
+    use ConvertableObject;
+
+    private $assetDownloads;
+
+    function __construct($assetDownloads) {
+        $this->assetDownloads = $assetDownloads;
+    }
+
+    function GetAssetDownloads() {
+        return $this->assetDownloads;
+    }
+}
+
 class AssetSalesInfo extends ParsedData {
     use ConvertableObject;
 
@@ -603,41 +649,51 @@ class AssetSalesInfo extends ParsedData {
     }
 
     public function FetchAssetId() {
-        $redirect = self::GetRedirectUrl($this->data['shortLink']);
+        $redirect = HttpUtilities::GetRedirectUrl($this->data['shortLink']);
         $redirect = end(explode('/', $redirect));
 
         return $redirect;
     }
+}
 
-    // http://w-shadow.com/blog/2008/07/05/how-to-get-redirect-url-in-php/
-    private static function GetRedirectUrl($url) {
-        $redirect_url = null;
-     
-        $url_parts = @parse_url($url);
-        if (!$url_parts) return false;
-        if (!isset($url_parts['host'])) return false; //can't process relative URLs
-        if (!isset($url_parts['path'])) $url_parts['path'] = '/';
-          
-        $sock = fsockopen($url_parts['host'], (isset($url_parts['port']) ? (int)$url_parts['port'] : 80), $errno, $errstr, 30);
-        if (!$sock) return false;
-          
-        $request = "HEAD " . $url_parts['path'] . (isset($url_parts['query']) ? '?'.$url_parts['query'] : '') . " HTTP/1.1\r\n";
-        $request .= 'Host: ' . $url_parts['host'] . "\r\n";
-        $request .= "Connection: Close\r\n\r\n";
-        fwrite($sock, $request);
-        $response = '';
-        while(!feof($sock)) $response .= fread($sock, 8192);
-        fclose($sock);
-     
-        if (preg_match('/^Location: (.+?)$/m', $response, $matches)) {
-            if (substr($matches[1], 0, 1) == "/")
-                return $url_parts['scheme'] . "://" . $url_parts['host'] . trim($matches[1]);
-            else
-                return trim($matches[1]);
-      
-        } else {
-            return false;
-        }
+class AssetDownloadsInfo extends ParsedData {
+    use ConvertableObject;
+
+    function __construct($data) {
+        $this->data = Array(
+            'name' => $data[0],
+            'quantity' => $data[1] != null ? (int) $data[1] : null,
+            'firstDownload' => $data[2] != null ? self::ParseDate($data[2]) : null,
+            'lastDownload' => $data[3] != null ? self::ParseDate($data[3]) : null,
+            'shortLink' => $data['shortLink'],
+        );
+    }
+
+    public function GetAssetName() {
+        return $this->data['name'];
+    }
+
+    public function GetQuantity() {
+        return $this->data['quantity'];
+    }
+
+    public function GetFirstDownloadDate() {
+        return $this->data['firstDownload'];
+    }
+
+    public function GetLastDownloadDate() {
+        return $this->data['lastDownload'];
+    }
+
+    public function GetShortUrl() {
+        return $this->data['shortLink'];
+    }
+
+    public function FetchAssetId() {
+        $redirect = HttpUtilities::GetRedirectUrl($this->data['shortLink']);
+        $redirect = end(explode('/', $redirect));
+
+        return $redirect;
     }
 }
 
@@ -761,6 +817,39 @@ class HttpErrorCodes {
 
     public static function GetStatusMessage($code) {
         return self::$messages[$code];
+    }
+}
+
+class HttpUtilities {
+	// http://w-shadow.com/blog/2008/07/05/how-to-get-redirect-url-in-php/
+    public static function GetRedirectUrl($url) {
+        $redirect_url = null;
+     
+        $url_parts = @parse_url($url);
+        if (!$url_parts) return false;
+        if (!isset($url_parts['host'])) return false; //can't process relative URLs
+        if (!isset($url_parts['path'])) $url_parts['path'] = '/';
+          
+        $sock = fsockopen($url_parts['host'], (isset($url_parts['port']) ? (int)$url_parts['port'] : 80), $errno, $errstr, 30);
+        if (!$sock) return false;
+          
+        $request = "HEAD " . $url_parts['path'] . (isset($url_parts['query']) ? '?'.$url_parts['query'] : '') . " HTTP/1.1\r\n";
+        $request .= 'Host: ' . $url_parts['host'] . "\r\n";
+        $request .= "Connection: Close\r\n\r\n";
+        fwrite($sock, $request);
+        $response = '';
+        while(!feof($sock)) $response .= fread($sock, 8192);
+        fclose($sock);
+     
+        if (preg_match('/^Location: (.+?)$/m', $response, $matches)) {
+            if (substr($matches[1], 0, 1) == "/")
+                return $url_parts['scheme'] . "://" . $url_parts['host'] . trim($matches[1]);
+            else
+                return trim($matches[1]);
+      
+        } else {
+            return false;
+        }
     }
 }
 

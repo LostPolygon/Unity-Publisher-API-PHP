@@ -71,6 +71,7 @@
     }
 
     $sales = $store->FetchSales($salesYear, $salesMonth);
+    $downloads = $store->FetchDownloads($salesYear, $salesMonth);
 ?>
 
 <h3>Gross: $<?php echo $sales->GetRevenueGross(); ?>, net: $<?php echo $sales->GetRevenueNet(); ?> (<?php echo $sales->GetPayoutCut() * 100; ?>%)</h3>
@@ -88,7 +89,7 @@
 <br>
 <br>
 <table>
-<tr><th>Package</th><th>Price ($)</th><th>Qty</th><th>Refunds</th><th>Chargebacks</th><th>Gross ($)</th><th>First</th><th>Last</th></tr>
+<tr><th>Paid Package</th><th>Price ($)</th><th>Qty</th><th>Refunds</th><th>Chargebacks</th><th>Gross ($)</th><th>First</th><th>Last</th></tr>
 <?php
     foreach ($sales->GetAssetSales() as $value) {
         echo sprintf('<tr><td><a href="%s">%s</a></td><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>', 
@@ -101,6 +102,22 @@
                      $value->GetGross() == 0 ? null : $value->GetGross(),
                      $value->GetFirstPurchaseDate() == null ? null : date('d F Y', $value->GetFirstPurchaseDate()),
                      $value->GetLastPurchaseDate() == null ? null : date('d F Y', $value->GetLastPurchaseDate())
+                     );
+    }
+?>
+</table>
+<br>
+<br>
+<table>
+<tr><th>Free Package</th><th>Qty</th><th>First</th><th>Last</th></tr>
+<?php
+    foreach ($downloads->GetAssetDownloads() as $value) {
+        echo sprintf('<tr><td><a href="%s">%s</a></td><td>%s</td><td>%s</td><td>%s</td></tr>', 
+                     $value->GetShortUrl(),
+                     $value->GetAssetName(),
+                     $value->GetQuantity(),
+                     $value->GetFirstDownloadDate() == null ? null : date('d F Y', $value->GetFirstDownloadDate()),
+                     $value->GetLastDownloadDate() == null ? null : date('d F Y', $value->GetLastDownloadDate())
                      );
     }
 ?>
