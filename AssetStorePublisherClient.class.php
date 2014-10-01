@@ -4,19 +4,18 @@ namespace AssetStore;
 class AssetStoreException extends \Exception { }
 
 class Client {
-    const PUBLISHER_ADMINISTRATION_URL = 'https://publisher.assetstore.unity3d.com';
-    const LOGIN_URL = self::PUBLISHER_ADMINISTRATION_URL . '/login';
-    const LOGOUT_URL = self::PUBLISHER_ADMINISTRATION_URL . '/logout';
-    const SALES_URL = self::PUBLISHER_ADMINISTRATION_URL . '/sales.html';
-    const USER_OVERVIEW_JSON_URL = self::PUBLISHER_ADMINISTRATION_URL . '/api/user/overview.json';
-    const PUBLISHER_OVERVIEW_JSON_URL = self::PUBLISHER_ADMINISTRATION_URL . '/api/publisher/overview.json';
-    const SALES_PERIODS_JSON_URL = self::PUBLISHER_ADMINISTRATION_URL . '/api/publisher-info/months/{publisher_id}.json';
-    const SALES_JSON_URL = self::PUBLISHER_ADMINISTRATION_URL . '/api/publisher-info/sales/{publisher_id}/{year}{month}.json';
-    const DOWNLOADS_JSON_URL = self::PUBLISHER_ADMINISTRATION_URL . '/api/publisher-info/downloads/{publisher_id}/{year}{month}.json';
-    const INVOICE_VERIFY_JSON_URL = self::PUBLISHER_ADMINISTRATION_URL . '/api/publisher-info/verify-invoice/{publisher_id}/{invoice_id}.json';
-    const REVENUE_JSON_URL = self::PUBLISHER_ADMINISTRATION_URL . '/api/publisher-info/revenue/{publisher_id}.json';
-    const PENDING_JSON_URL = self::PUBLISHER_ADMINISTRATION_URL . '/api/publisher-info/pending/{publisher_id}.json';
-    const API_KEY_JSON_URL = self::PUBLISHER_ADMINISTRATION_URL . '/api/publisher-info/api-key/{publisher_id}.json';
+    const LOGIN_URL = 'https://publisher.assetstore.unity3d.com/login';
+    const LOGOUT_URL = 'https://publisher.assetstore.unity3d.com/logout';
+    const SALES_URL = 'https://publisher.assetstore.unity3d.com/sales.html';
+    const USER_OVERVIEW_JSON_URL = 'https://publisher.assetstore.unity3d.com/api/user/overview.json';
+    const PUBLISHER_OVERVIEW_JSON_URL = 'https://publisher.assetstore.unity3d.com/api/publisher/overview.json';
+    const SALES_PERIODS_JSON_URL = 'https://publisher.assetstore.unity3d.com/api/publisher-info/months/{publisher_id}.json';
+    const SALES_JSON_URL = 'https://publisher.assetstore.unity3d.com/api/publisher-info/sales/{publisher_id}/{year}{month}.json';
+    const DOWNLOADS_JSON_URL = 'https://publisher.assetstore.unity3d.com/api/publisher-info/downloads/{publisher_id}/{year}{month}.json';
+    const INVOICE_VERIFY_JSON_URL = 'https://publisher.assetstore.unity3d.com/api/publisher-info/verify-invoice/{publisher_id}/{invoice_id}.json';
+    const REVENUE_JSON_URL = 'https://publisher.assetstore.unity3d.com/api/publisher-info/revenue/{publisher_id}.json';
+    const PENDING_JSON_URL = 'https://publisher.assetstore.unity3d.com/api/publisher-info/pending/{publisher_id}.json';
+    const API_KEY_JSON_URL = 'https://publisher.assetstore.unity3d.com/api/publisher-info/api-key/{publisher_id}.json';
     const LOGIN_TOKEN = '26c4202eb475d02864b40827dfff11a14657aa41';
     const USER_AGENT = 'Mozilla/5.0 (Windows NT 6.3; rv:27.0) Gecko/20100101 Firefox/27.0';
 
