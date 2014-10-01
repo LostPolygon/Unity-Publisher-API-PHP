@@ -1,18 +1,22 @@
 <?php
 namespace AssetStore;
 
+class AssetStoreException extends \Exception { }
+
 class Client {
-    const LOGIN_URL = 'https://publisher.assetstore.unity3d.com/login';
-    const LOGOUT_URL = 'https://publisher.assetstore.unity3d.com/logout';
-    const SALES_URL = 'https://publisher.assetstore.unity3d.com/sales.html';
-    const USER_OVERVIEW_JSON_URL = 'https://publisher.assetstore.unity3d.com/api/user/overview.json';
-    const PUBLISHER_OVERVIEW_JSON_URL = 'https://publisher.assetstore.unity3d.com/api/publisher/overview.json';
-    const SALES_PERIODS_JSON_URL = 'https://publisher.assetstore.unity3d.com/api/publisher-info/sales-periods/{publisher_id}.json';
-    const SALES_JSON_URL = 'https://publisher.assetstore.unity3d.com/api/publisher-info/sales/{publisher_id}/{year}{month}.json';
-    const DOWNLOADS_JSON_URL = 'https://publisher.assetstore.unity3d.com/api/publisher-info/downloads/{publisher_id}/{year}{month}.json';
-    const INVOICE_VERIFY_JSON_URL = 'https://publisher.assetstore.unity3d.com/api/publisher-info/verify-invoice/{publisher_id}/{invoice_id}.json';
-    const REVENUE_JSON_URL = 'https://publisher.assetstore.unity3d.com/api/publisher-info/revenue/{publisher_id}.json';
-    const PENDING_JSON_URL = 'https://publisher.assetstore.unity3d.com/api/publisher-info/pending/{publisher_id}.json';
+    const PUBLISHER_ADMINISTRATION_URL = 'https://publisher.assetstore.unity3d.com';
+    const LOGIN_URL = self::PUBLISHER_ADMINISTRATION_URL . '/login';
+    const LOGOUT_URL = self::PUBLISHER_ADMINISTRATION_URL . '/logout';
+    const SALES_URL = self::PUBLISHER_ADMINISTRATION_URL . '/sales.html';
+    const USER_OVERVIEW_JSON_URL = self::PUBLISHER_ADMINISTRATION_URL . '/api/user/overview.json';
+    const PUBLISHER_OVERVIEW_JSON_URL = self::PUBLISHER_ADMINISTRATION_URL . '/api/publisher/overview.json';
+    const SALES_PERIODS_JSON_URL = self::PUBLISHER_ADMINISTRATION_URL . '/api/publisher-info/months/{publisher_id}.json';
+    const SALES_JSON_URL = self::PUBLISHER_ADMINISTRATION_URL . '/api/publisher-info/sales/{publisher_id}/{year}{month}.json';
+    const DOWNLOADS_JSON_URL = self::PUBLISHER_ADMINISTRATION_URL . '/api/publisher-info/downloads/{publisher_id}/{year}{month}.json';
+    const INVOICE_VERIFY_JSON_URL = self::PUBLISHER_ADMINISTRATION_URL . '/api/publisher-info/verify-invoice/{publisher_id}/{invoice_id}.json';
+    const REVENUE_JSON_URL = self::PUBLISHER_ADMINISTRATION_URL . '/api/publisher-info/revenue/{publisher_id}.json';
+    const PENDING_JSON_URL = self::PUBLISHER_ADMINISTRATION_URL . '/api/publisher-info/pending/{publisher_id}.json';
+    const API_KEY_JSON_URL = self::PUBLISHER_ADMINISTRATION_URL . '/api/publisher-info/api-key/{publisher_id}.json';
     const LOGIN_TOKEN = '26c4202eb475d02864b40827dfff11a14657aa41';
     const USER_AGENT = 'Mozilla/5.0 (Windows NT 6.3; rv:27.0) Gecko/20100101 Firefox/27.0';
 
@@ -83,6 +87,15 @@ class Client {
         return $this->publisherInfoOverview;
     }
 
+    public function FetchApiKey() {
+        $url = str_replace('{publisher_id}', $this->GetPublisherInfo()->GetId(), self::API_KEY_JSON_URL);
+        $result = $this->GetSimpleData(Array('url' => $url));
+        self::AssertHttpCode('Fetching API key failed, error code {code}', $result['http_code']);
+
+        $keyDataObject = json_decode($result['data']);
+        return $keyDataObject->api_key;
+    }
+
     public function FetchSalesPeriods() {
         $this->AssertIsLoggedIn();
 
@@ -144,9 +157,8 @@ class Client {
             $value = preg_replace('#[^0-9]#', '', $value);
         }
         unset($value);
+        $invoiceNumbers = implode(',', $invoiceNumbers);
 
-        $invoiceNumbers = implode(' ', $invoiceNumbers);
-  
         $url = str_replace(Array('{publisher_id}', '{invoice_id}'),
                            Array($this->GetPublisherInfo()->GetId(), urlencode($invoiceNumbers)), 
                            self::INVOICE_VERIFY_JSON_URL);
@@ -154,7 +166,6 @@ class Client {
         self::AssertHttpCode('Invoice verification failed, error code {code}', $result['http_code']);
 
         $invoiceInfoObject = json_decode($result['data']);
-
         $invoiceInfo = Array();
         foreach ($invoiceInfoObject->aaData as $value) {
             $invoiceInfo[] = new InvoiceInfo($value);
@@ -258,8 +269,12 @@ class Client {
 
         $ch = $this->SetupCurlQuery($params); 
         $result['data'] = curl_exec($ch);
+        $curlError = curl_error($ch);
         $result['http_code'] = curl_getinfo($ch, CURLINFO_HTTP_CODE);
         curl_close($ch);
+        if (!empty($curlError)) {
+            throw new AssetStoreException("CURL error occured: {$curlError}");
+        }
 
         return $result;
     }
@@ -293,8 +308,8 @@ class Client {
     }
 
     private static function AssertHttpCode($message, $code) {
-        if (HttpErrorCodes::IsErrorCode($code)) {
-            throw new AssetStoreException(str_replace('{code}', $code . ' (' . HttpErrorCodes::GetStatusMessage($code) . ')', $message));
+        if (HttpUtilities::IsErrorCode($code)) {
+            throw new AssetStoreException(str_replace('{code}', $code . ' (' . HttpUtilities::GetStatusMessage($code) . ')', $message));
         }
     }
   
@@ -310,8 +325,6 @@ class Client {
         }
     }
 }
-
-class AssetStoreException extends \Exception { }
 
 abstract class ParsedData {
     protected $data = Array();
@@ -525,8 +538,8 @@ class SalesPeriod {
     private $month;
 
     function __construct($data) {
-        $this->year = (int) (int) substr($data->value, 0, 4);
-        $this->month = (int) (int) substr($data->value, 4, 2);
+        $this->year = (int) substr($data->value, 0, 4);
+        $this->month = (int) substr($data->value, 4, 2);
     }
 
     public function GetYear() {
@@ -760,8 +773,8 @@ class PendingInfo extends ParsedData {
     }
 }
 
-class HttpErrorCodes {
-    private static $messages = Array(
+class HttpUtilities {
+    private static $errorMessages = Array(
         // [Informational 1xx]    
         100 => 'Continue',    
         101 => 'Switching Protocols',    
@@ -816,12 +829,10 @@ class HttpErrorCodes {
     }
 
     public static function GetStatusMessage($code) {
-        return self::$messages[$code];
+        return self::$errorMessages[$code];
     }
-}
 
-class HttpUtilities {
-	// http://w-shadow.com/blog/2008/07/05/how-to-get-redirect-url-in-php/
+    // http://w-shadow.com/blog/2008/07/05/how-to-get-redirect-url-in-php/
     public static function GetRedirectUrl($url) {
         $redirect_url = null;
      
