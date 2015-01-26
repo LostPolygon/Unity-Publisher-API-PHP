@@ -14,7 +14,7 @@ class Client {
     const DOWNLOADS_JSON_URL = 'https://publisher.assetstore.unity3d.com/api/publisher-info/downloads/{publisher_id}/{year}{month}.json';
     const INVOICE_VERIFY_JSON_URL = 'https://publisher.assetstore.unity3d.com/api/publisher-info/verify-invoice/{publisher_id}/{invoice_id}.json';
     const REVENUE_JSON_URL = 'https://publisher.assetstore.unity3d.com/api/publisher-info/revenue/{publisher_id}.json';
-    const PENDING_JSON_URL = 'https://publisher.assetstore.unity3d.com/api/publisher-info/pending/{publisher_id}.json';
+    const PACKAGES_JSON_URL = 'https://publisher.assetstore.unity3d.com/api/management/packages.json';
     const API_KEY_JSON_URL = 'https://publisher.assetstore.unity3d.com/api/publisher-info/api-key/{publisher_id}.json';
     const LOGIN_TOKEN = '26c4202eb475d02864b40827dfff11a14657aa41';
     const USER_AGENT = 'Mozilla/5.0 (Windows NT 6.3; rv:27.0) Gecko/20100101 Firefox/27.0';
@@ -129,18 +129,18 @@ class Client {
         return $infoArray;
     }
 
-    public function FetchPending() {
+    public function FetchPackages() {
         $this->AssertIsLoggedIn();
 
-        $url = str_replace('{publisher_id}', $this->GetPublisherInfo()->GetId(), self::PENDING_JSON_URL);
+        $url = str_replace('{publisher_id}', $this->GetPublisherInfo()->GetId(), self::PACKAGES_JSON_URL);
         $result = $this->GetSimpleData(Array('url' => $url));
-        self::AssertHttpCode('Fetching pending packages failed, error code {code}', $result['http_code']);
+        self::AssertHttpCode('Fetching packages failed, error code {code}', $result['http_code']);
 
         $infoObject = json_decode($result['data']);
 
         $infoArray = Array();
-        foreach ($infoObject->aaData as $value) {
-            $infoArray[] = new PendingInfo($value);
+        foreach ($infoObject->packages as $value) {
+            $infoArray[] = new PackageInfo($value);
         }
 
         return $infoArray;
@@ -197,8 +197,8 @@ class Client {
         $salesInfo = Array();
 
         foreach ($salesInfoObject->aaData as $key => $value) {
-            $value['shortLink'] = $salesInfoObject->result[$key]->short_url;
-            $salesInfo[] = new AssetSalesInfo($value);
+            $value['shortUrl'] = $salesInfoObject->result[$key]->short_url;
+            $salesInfo[] = new PackageSalesInfo($value);
         }
 
         return new PeriodSalesInfo($salesInfo, $this->GetPublisherInfo()->GetPayoutCut());
@@ -228,8 +228,8 @@ class Client {
         $downloadsInfo = Array();
 
         foreach ($downloadsInfoObject->aaData as $key => $value) {
-            $value['shortLink'] = $downloadsInfoObject->result[$key]->short_url;
-            $downloadsInfo[] = new AssetDownloadsInfo($value);
+            $value['shortUrl'] = $downloadsInfoObject->result[$key]->short_url;
+            $downloadsInfo[] = new PackageDownloadsInfo($value);
         }
 
         return new PeriodDownloadsInfo($downloadsInfo);
@@ -333,6 +333,13 @@ abstract class ParsedData {
             return null;
 
         return \DateTime::createFromFormat('Y-m-d', $date)->getTimestamp();
+    }
+
+    protected static function ParseDateTime($dateTime) {
+        if(empty($dateTime))
+            return null;
+
+        return \DateTime::createFromFormat('Y-m-d H:i:s', $dateTime)->getTimestamp();
     }
 
     protected static function ParseCurrency($value) {
@@ -507,7 +514,7 @@ class InvoiceInfo extends ParsedData {
     function __construct($data) {
         $this->data = Array(
             'id' => $data[0],
-            'assetName' => $data[1],
+            'packageName' => $data[1],
             'date' => self::ParseDate($data[2]),
             'isRefunded' => $data[3] === 'Yes',
         );
@@ -517,8 +524,8 @@ class InvoiceInfo extends ParsedData {
         return $this->data['id'];
     }
 
-    public function GetAssetName() {
-        return $this->data['assetName'];
+    public function GetPackageName() {
+        return $this->data['packageName'];
     }
 
     public function GetPurchaseDate() {
@@ -557,17 +564,17 @@ class SalesPeriod {
 class PeriodSalesInfo {
     use ConvertableObject;
 
-    private $assetSales;
+    private $packageSales;
     private $revenueGross;
     private $revenueNet;
     private $payoutCut;
 
-    function __construct($assetSales, $payoutCut = 0.7) {
-        $this->assetSales = $assetSales;
+    function __construct($packageSales, $payoutCut = 0.7) {
+        $this->packageSales = $packageSales;
         $this->payoutCut = (float)$payoutCut;
 
         $this->revenueGross = 0;
-        foreach ($this->assetSales as $value) {
+        foreach ($this->packageSales as $value) {
             $this->revenueGross += $value->GetPrice() * ($value->GetQuantity() - 
                                                          $value->GetRefunds() - 
                                                          $value->GetChargebacks());
@@ -576,8 +583,8 @@ class PeriodSalesInfo {
         $this->revenueNet = $this->revenueGross * $this->payoutCut;
     }
 
-    function GetAssetSales() {
-        return $this->assetSales;
+    function GetPackageSales() {
+        return $this->packageSales;
     }
 
     function GetRevenueGross() {
@@ -596,18 +603,18 @@ class PeriodSalesInfo {
 class PeriodDownloadsInfo {
     use ConvertableObject;
 
-    private $assetDownloads;
+    private $packageDownloads;
 
-    function __construct($assetDownloads) {
-        $this->assetDownloads = $assetDownloads;
+    function __construct($packageDownloads) {
+        $this->packageDownloads = $packageDownloads;
     }
 
-    function GetAssetDownloads() {
-        return $this->assetDownloads;
+    function GetPackageDownloads() {
+        return $this->packageDownloads;
     }
 }
 
-class AssetSalesInfo extends ParsedData {
+class PackageSalesInfo extends ParsedData {
     use ConvertableObject;
 
     function __construct($data) {
@@ -620,11 +627,11 @@ class AssetSalesInfo extends ParsedData {
             'gross' => $data[5] != null ? self::ParseCurrency($data[5]) : null,
             'firstPurchase' => $data[6] != null ? self::ParseDate($data[6]) : null,
             'lastPurchase' => $data[7] != null ? self::ParseDate($data[7]) : null,
-            'shortLink' => $data['shortLink'],
+            'shortUrl' => $data['shortUrl'],
         );
     }
 
-    public function GetAssetName() {
+    public function GetPackageName() {
         return $this->data['name'];
     }
 
@@ -657,18 +664,18 @@ class AssetSalesInfo extends ParsedData {
     }
 
     public function GetShortUrl() {
-        return $this->data['shortLink'];
+        return $this->data['shortUrl'];
     }
 
-    public function FetchAssetId() {
-        $redirect = HttpUtilities::GetRedirectUrl($this->data['shortLink']);
+    public function FetchPackageId() {
+        $redirect = HttpUtilities::GetRedirectUrl($this->data['shortUrl']);
         $redirect = end(explode('/', $redirect));
 
         return $redirect;
     }
 }
 
-class AssetDownloadsInfo extends ParsedData {
+class PackageDownloadsInfo extends ParsedData {
     use ConvertableObject;
 
     function __construct($data) {
@@ -677,11 +684,11 @@ class AssetDownloadsInfo extends ParsedData {
             'quantity' => $data[1] != null ? (int) $data[1] : null,
             'firstDownload' => $data[2] != null ? self::ParseDate($data[2]) : null,
             'lastDownload' => $data[3] != null ? self::ParseDate($data[3]) : null,
-            'shortLink' => $data['shortLink'],
+            'shortUrl' => $data['shortUrl'],
         );
     }
 
-    public function GetAssetName() {
+    public function GetPackageName() {
         return $this->data['name'];
     }
 
@@ -698,18 +705,18 @@ class AssetDownloadsInfo extends ParsedData {
     }
 
     public function GetShortUrl() {
-        return $this->data['shortLink'];
+        return $this->data['shortUrl'];
     }
 
-    public function FetchAssetId() {
-        $redirect = HttpUtilities::GetRedirectUrl($this->data['shortLink']);
+    public function FetchPackageId() {
+        $redirect = HttpUtilities::GetRedirectUrl($this->data['shortUrl']);
         $redirect = end(explode('/', $redirect));
 
         return $redirect;
     }
 }
 
-class PendingInfo extends ParsedData {
+class PackageVersionInfo extends ParsedData {
     use ConvertableObject;
 
     const StatusUnknown = -1;
@@ -717,58 +724,104 @@ class PendingInfo extends ParsedData {
     const StatusDraft = 2;
     const StatusPending = 3;
     const StatusDeclined = 4;
-
-    private $status;
+    const StatusPublished = 5;
 
     function __construct($data) {
         $status = self::StatusUnknown;
-        $size = $data[1];
-        $status = $data[2];
 
         // Parse status
-        if (stripos($status, 'pending') !== false) {
+        if (stripos($data->status, 'published') !== false) {
+            $status = self::StatusPublished;
+        } elseif (stripos($data->status, 'pending') !== false) {
             $status = self::StatusPending;
-        } elseif (stripos($status, 'declined') !== false) {
+        } elseif (stripos($data->status, 'declined') !== false) {
             $status = self::StatusDeclined;
-        } elseif (stripos($status, 'draft') !== false) {
+        } elseif (stripos($data->status, 'draft') !== false) {
             $status = self::StatusDraft;
-        } elseif (stripos($status, 'error') !== false) {
+        } elseif (stripos($data->status, 'error') !== false) {
             $status = self::StatusError;
         }
 
-        // Parse size
-        $sizeExplode = explode(' ', $size);
-        $size = (float) $sizeExplode[0];
-        if ($sizeExplode[1] === 'GB') {
-            $size *= 1000 * 1000;
-        } elseif ($sizeExplode[1] === 'MB') {
-            $size *= 1000;
-        }
-
-        $size = (int) ($size * 1000); // to bytes
-
+            //var_dump($data->modified);
         $this->data = Array(
-            'name' => $data[0],
-            'packageSize' => $size,
+            'name' => $data->name,
             'status' => $status,
-            'updateDate' => self::ParseDate($data[3])
+            'size' => (int) $data->size,
+            'modifiedDate' => self::ParseDateTime($data->modified),
+            'createdDate' => self::ParseDateTime($data->created),
+            'publishedDate' => self::ParseDateTime($data->published),
+            'price' => (float) $data->price,
+            'version' => $data->version_name,
+            'categoryId' => (int) $data->category_id,
+            'releaseNotes' => $data->publishnotes,
         );
     }
 
-    public function GetAssetName() {
+    public function GetName() {
         return $this->data['name'];
-    }
-
-    public function GetPackageSize() {
-        return $this->data['packageSize'];
     }
 
     public function GetStatus() {
         return $this->data['status'];
     }
 
-    public function GetUpdateDate() {
-        return $this->data['updateDate'];
+    public function GetVersion() {
+        return $this->data['version'];
+    }
+
+    public function GetSize() {
+        return $this->data['size'];
+    }
+
+    public function GetPrice() {
+        return $this->data['price'];
+    }
+
+    public function GetCategoryId() {
+        return $this->data['categoryId'];
+    }
+
+    public function GetReleaseNotes() {
+        return $this->data['releaseNotes'];
+    }
+
+    public function GetModifiedDate() {
+        return $this->data['modifiedDate'];
+    }
+
+    public function GetCreatedDate() {
+        return $this->data['createdDate'];
+    }
+
+    public function GetPublishedDate() {
+        return $this->data['publishedDate'];
+    }
+}
+
+class PackageInfo extends ParsedData {
+    function __construct($data) {
+        $versions = Array();
+        foreach ($data->versions as $versionData) {
+            $versions[] = new PackageVersionInfo($versionData);
+        }
+
+        $this->data = Array(
+            'id' => (int) $data->id,
+            'shortUrl' => $data->short_url,
+            'versions' => $versions
+        );
+    }
+
+    public function GetId() {
+        return $this->data['id'];
+    }
+
+    public function GetShortUrl() {
+        return $this->data['shortUrl'];
+    }
+
+    public function GetVersions() {
+        return $this->data['versions'];
     }
 }
 

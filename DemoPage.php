@@ -1,6 +1,6 @@
 <html>
 <head>
-<title>UnityAssetStorePublisherPHP demo</title>
+<title>Unity Publisher API for PHP demo</title>
 <style>
     table {
         border-collapse: collapse;
@@ -12,6 +12,27 @@
     th {
         background: #EEE;
     }
+
+    .changelog_cell{
+        position: relative;
+    }
+
+    .changelog_cell:hover .changelog_body {
+        display: block;
+    }
+
+    .changelog_body {
+        display: none;
+        top: 0;
+        right: 100%;
+        width: 500px;
+        position: absolute;
+        padding: 5px;
+        background: white;
+        border: 2px solid gray;
+        z-index: 1000; 
+        overflow: auto;
+    }
 </style>
 </head>
 <body>
@@ -22,7 +43,7 @@
     $store = new AssetStore\Client();
 
     // Login with your credentials
-    $store->Login('your@email.com', 'password');
+    $store->Login('your@publisher.email.com', 'password');
 
     // Or, if you don't want to keep your credentials in the code, use the token (returned by Login() method or retrieved from your browser cookies)
     // $store->LoginWithToken('put your token here');
@@ -59,7 +80,19 @@
 ?>
 </ul>
 
-<h2>Sales</h2>
+<h2>Sales and downloads</h2>
+Period: <select name="selectedPeriod" onChange="document.forms['asForm'].submit();">
+<?php
+    foreach ($salesPeriods as $value) {
+        echo sprintf('<option value="%s" %s>%s</option>', 
+                     $value->GetYear() . '-' . $value->GetMonth(),
+                     ($value->GetYear() == $salesYear && $value->GetMonth() == $salesMonth) ? 'selected' : '',
+                     date('F Y', $value->GetDate())
+                     );
+    }
+?>
+</select>
+<h3>Sales</h3>
 <?php
     $salesYear = reset($salesPeriods)->GetYear();
     $salesMonth = reset($salesPeriods)->GetMonth();
@@ -74,27 +107,14 @@
     $downloads = $store->FetchDownloads($salesYear, $salesMonth);
 ?>
 
-<h3>Gross: $<?php echo $sales->GetRevenueGross(); ?>, net: $<?php echo $sales->GetRevenueNet(); ?> (<?php echo $sales->GetPayoutCut() * 100; ?>%)</h3>
-<select name="selectedPeriod" onChange="document.forms['asForm'].submit();">
-<?php
-    foreach ($salesPeriods as $value) {
-        echo sprintf('<option value="%s" %s>%s</option>', 
-                     $value->GetYear() . '-' . $value->GetMonth(),
-                     ($value->GetYear() == $salesYear && $value->GetMonth() == $salesMonth) ? 'selected' : '',
-                     date('F Y', $value->GetDate())
-                     );
-    }
-?>
-</select>
-<br>
-<br>
+<h4>Gross: $<?php echo $sales->GetRevenueGross(); ?>, net: $<?php echo $sales->GetRevenueNet(); ?> (<?php echo $sales->GetPayoutCut() * 100; ?>%)</h4>
 <table>
-<tr><th>Paid Package</th><th>Price ($)</th><th>Qty</th><th>Refunds</th><th>Chargebacks</th><th>Gross ($)</th><th>First</th><th>Last</th></tr>
+<tr><th>Package name</th><th>Price ($)</th><th>Qty</th><th>Refunds</th><th>Chargebacks</th><th>Gross ($)</th><th>First</th><th>Last</th></tr>
 <?php
-    foreach ($sales->GetAssetSales() as $value) {
+    foreach ($sales->GetPackageSales() as $value) {
         echo sprintf('<tr><td><a href="%s">%s</a></td><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>', 
                      $value->GetShortUrl(),
-                     $value->GetAssetName(),
+                     $value->GetPackageName(),
                      $value->GetPrice(),
                      $value->GetQuantity(),
                      $value->GetRefunds(),
@@ -106,15 +126,15 @@
     }
 ?>
 </table>
-<br>
-<br>
+
+<h3>Free Downloads</h3>
 <table>
-<tr><th>Free Package</th><th>Qty</th><th>First</th><th>Last</th></tr>
+<tr><th>Package name</th><th>Qty</th><th>First</th><th>Last</th></tr>
 <?php
-    foreach ($downloads->GetAssetDownloads() as $value) {
+    foreach ($downloads->GetPackageDownloads() as $value) {
         echo sprintf('<tr><td><a href="%s">%s</a></td><td>%s</td><td>%s</td><td>%s</td></tr>', 
                      $value->GetShortUrl(),
-                     $value->GetAssetName(),
+                     $value->GetPackageName(),
                      $value->GetQuantity(),
                      $value->GetFirstDownloadDate() == null ? null : date('d F Y', $value->GetFirstDownloadDate()),
                      $value->GetLastDownloadDate() == null ? null : date('d F Y', $value->GetLastDownloadDate())
@@ -153,39 +173,66 @@
 ?>
 </table>
 
-<h2>Pending</h2>
+<h2>Packages</h2>
 <table>
-<tr><th>Package</th><th>Status</th><th>Size</th><th>Updated</th></tr>
+<tr><th>Package</th><th>Status</th><th>Version</th><th>Price ($)</th><th>Size</th><th>Created</th><th>Published</th><th>Modified</th><th>Id</th><th>Changelog</th></tr>
 <?php
-    $pending = $store->FetchPending();
+    $packages = $store->FetchPackages();
 
-    foreach ($pending as $value) {
-        switch ($value->GetStatus()) {
-            case AssetStore\PendingInfo::StatusDraft:
-                $infoType = 'Draft';
-                break;
-            case AssetStore\PendingInfo::StatusPending:
-                $infoType = 'Pending';
-                break;
-            case AssetStore\PendingInfo::StatusDeclined:
-                $infoType = 'Declined';
-                break;
-            case AssetStore\PendingInfo::StatusError:
-                $infoType = 'Error';
-                break;
-            default:
-                $infoType = 'Unknown';
-                break;
+    foreach ($packages as $package) {
+        $versions = $package->GetVersions();
+
+        echo "<tr>";
+
+        foreach ($versions as $version) {
+            switch ($version->GetStatus()) {
+                case AssetStore\PackageVersionInfo::StatusPublished:
+                    $infoType = 'Published';
+                    break;
+                case AssetStore\PackageVersionInfo::StatusDraft:
+                    $infoType = 'Draft';
+                    break;
+                case AssetStore\PackageVersionInfo::StatusPending:
+                    $infoType = 'Pending';
+                    break;
+                case AssetStore\PackageVersionInfo::StatusDeclined:
+                    $infoType = 'Declined';
+                    break;
+                case AssetStore\PackageVersionInfo::StatusError:
+                    $infoType = 'Error';
+                    break;
+                default:
+                    $infoType = 'Unknown';
+                    break;
+            }
+
+            $size = $version->GetSize();
+
+            echo sprintf('<td><a href="%s">%s</a></td>
+                          <td>%s</td>
+                          <td>%s</td>
+                          <td>%s</td>
+                          <td>%s kB</td>
+                          <td>%s</td>
+                          <td>%s</td>
+                          <td>%s</td>
+                          <td>%s</td>
+                          <td class="changelog_cell"><i>Hover to see</i><div class="changelog_body">%s</div></td>', 
+                         $package->GetShortUrl(), 
+                         $version->GetName(), 
+                         $infoType,
+                         $version->GetVersion(),
+                         $version->GetPrice(),
+                         $size / 1000,
+                         date('d F Y H:i:s', $version->GetCreatedDate()),
+                         date('d F Y H:i:s', $version->GetPublishedDate()),
+                         date('d F Y H:i:s', $version->GetModifiedDate()),
+                         $package->GetId(),
+                         htmlspecialchars($version->GetReleaseNotes())
+                         );
         }
 
-        $size = $value->GetPackageSize();
-
-        echo sprintf('<tr><td>%s</td><td>%s</td><td>%s kB</td><td>%s</td></tr>', 
-                     $value->GetAssetName(), 
-                     $infoType,
-                     $size / 1000,
-                     date('d F Y', $value->GetUpdateDate())
-                     );
+        echo "</tr>";
     }
 ?>
 </table>
@@ -213,7 +260,7 @@ Enter comma separated invoice numbers:
         foreach ($invoiceNumbersInfo as $value) {
             echo sprintf('<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>', 
                          $value->GetInvoiceNumber(),
-                         $value->GetAssetName(),
+                         $value->GetPackageName(),
                          date('d F Y', $value->GetPurchaseDate()),
                          $value->IsRefunded() ? 'Yes' : 'No'
                          );
