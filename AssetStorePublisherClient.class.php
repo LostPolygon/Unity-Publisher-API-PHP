@@ -150,14 +150,13 @@ class Client {
         $this->AssertIsLoggedIn();
 
         if (!is_array($invoiceNumbers)) {
-            $invoiceNumbers = Array($invoiceNumbers);
+            $invoiceNumbers = preg_split("#[\s,]+#", $invoiceNumbers, 0, PREG_SPLIT_NO_EMPTY);
         }
         foreach ($invoiceNumbers as &$value) {
             $value = preg_replace('#[^0-9]#', '', $value);
         }
         unset($value);
         $invoiceNumbers = implode(',', $invoiceNumbers);
-
         $url = str_replace(Array('{publisher_id}', '{invoice_id}'),
                            Array($this->GetPublisherInfo()->GetId(), urlencode($invoiceNumbers)), 
                            self::INVOICE_VERIFY_JSON_URL);
@@ -511,29 +510,62 @@ class RevenueInfo extends ParsedData {
 class InvoiceInfo extends ParsedData {
     use ConvertableObject;
 
+    const StatusUnknown = -1;
+    const StatusDownloaded = 1;
+    const StatusNotDownloaded = 2;
+    const StatusAnotherLicense = 3;
+    const StatusRefunded = 4;
+    const StatusChargedBack = 5;
+
     function __construct($data) {
+        $status = self::StatusUnknown;
+
+        // Parse status
+        $statusString = $data[5];
+        if (stripos($statusString, 'not downloaded') !== false) {
+            $status = self::StatusNotDownloaded;
+        } elseif (stripos($statusString, 'downloaded') !== false) {
+            $status = self::StatusDownloaded;
+        } elseif (stripos($statusString, 'license') !== false) {
+            $status = self::StatusAnotherLicense;
+        } elseif (stripos($statusString, 'refund') !== false) {
+            $status = self::StatusRefunded;
+        } elseif (stripos($statusString, 'charge') !== false) {
+            $status = self::StatusChargedBack;
+        }
+
         $this->data = Array(
-            'id' => $data[0],
+            'invoiceNumber' => (int) $data[0],
             'packageName' => $data[1],
-            'date' => self::ParseDate($data[2]),
-            'isRefunded' => $data[3] === 'Yes',
+            'quantity' => (int) $data[2],
+            'totalPrice' => self::ParseCurrency($data[3]),
+            'date' => self::ParseDate($data[4]),
+            'status' => $status,
         );
     }
 
     public function GetInvoiceNumber() {
-        return $this->data['id'];
+        return $this->data['invoiceNumber'];
     }
 
     public function GetPackageName() {
         return $this->data['packageName'];
     }
 
+    public function GetQuantity() {
+        return $this->data['quantity'];
+    }
+
+    public function GetTotalPrice() {
+        return $this->data['totalPrice'];
+    }
+
     public function GetPurchaseDate() {
         return $this->data['date'];
     }
 
-    public function IsRefunded() {
-        return $this->data['isRefunded'];
+    public function GetStatus() {
+        return $this->data['status'];
     }
 }
 
