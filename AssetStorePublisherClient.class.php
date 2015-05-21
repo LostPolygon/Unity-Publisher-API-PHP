@@ -404,7 +404,6 @@ class PublisherInfo extends ParsedData {
                             'rating' => (int) $data->rating->average,
                             'ratingCount' => (int) $data->rating->count,
                             'payoutCut' => $data->payout_cut,
-                            'publisherUrl' => $data->long_url,
                             'publisherShortUrl' => $data->short_url,
                             'siteUrl' => $data->url,
                             'supportUrl' => $data->support_url,
@@ -434,10 +433,6 @@ class PublisherInfo extends ParsedData {
 
     public function GetPayoutCut() {
         return $this->data['payoutCut'];
-    }
-
-    public function GetPublisherUrl() {
-        return $this->data['publisherUrl'];
     }
 
     public function GetPublisherShortUrl() {
@@ -774,7 +769,6 @@ class PackageVersionInfo extends ParsedData {
             $status = self::StatusError;
         }
 
-            //var_dump($data->modified);
         $this->data = Array(
             'name' => $data->name,
             'status' => $status,
