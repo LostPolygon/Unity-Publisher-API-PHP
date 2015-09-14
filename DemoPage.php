@@ -1,5 +1,6 @@
 <html>
 <head>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
 <title>Unity Publisher API for PHP demo</title>
 <style>
     table {
@@ -60,7 +61,6 @@
 <li>Description: <?php echo $publisherInfo->GetDescription(); ?></li>
 <li>Rating: <?php echo $publisherInfo->GetRating(); ?> (from <?php echo $publisherInfo->GetRatingCount(); ?> votes)</li>
 <li>Payout cut: <?php echo $publisherInfo->GetPayoutCut() * 100; ?>%</li>
-<li>Publisher URL: <?php echo $publisherInfo->GetPublisherUrl(); ?></li>
 <li>Publisher URL (short): <?php echo $publisherInfo->GetPublisherShortUrl(); ?></li>
 <li>URL: <?php echo $publisherInfo->GetSiteUrl(); ?></li>
 <li>Support URL: <?php echo $publisherInfo->GetSupportUrl(); ?></li>
