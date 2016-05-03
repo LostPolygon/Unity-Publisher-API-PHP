@@ -263,6 +263,12 @@ class Client {
     }
 
     private function GetSimpleData($params) {
+        if (isset($params['headers'])) {
+            $params['headers'] = array_merge($params['headers'], $this->GetRequiredHeaders());
+        } else {
+            $params['headers'] = $this->GetRequiredHeaders();
+        }
+
         $result = Array();
 
         $ch = $this->SetupCurlQuery($params); 
@@ -277,14 +283,6 @@ class Client {
         return $result;
     }
 
-    private function GetXUnitySessionCookie() {
-        if ($this->isLoggedIn) {
-            return $this->loginToken . self::LOGIN_TOKEN . self::LOGIN_TOKEN;
-        } else {
-            return self::LOGIN_TOKEN . self::LOGIN_TOKEN . self::LOGIN_TOKEN;
-        }
-    }
-
     private function GetLoginToken($user, $password) {
         $query = 
             Array(
@@ -295,7 +293,7 @@ class Client {
 
         $ch = self::SetupCurlQuery(Array('url' => self::LOGIN_URL, 
                                          'query' => $query,
-                                         'headers' => Array('X-Unity-Session: ' . $this->GetXUnitySessionCookie()))); 
+                                         'headers' => $this->GetRequiredHeaders())); 
         $result_data = curl_exec($ch);
         $result_http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
         curl_close($ch);
@@ -303,6 +301,28 @@ class Client {
         self::AssertHttpCode('Login failed, error code {code}', $result_http_code);
 
         return trim($result_data);
+    }
+
+    private function GetXUnitySessionCookie() {
+        if ($this->isLoggedIn) {
+            return $this->loginToken;
+        } else {
+            return self::LOGIN_TOKEN;
+        }
+    }
+
+    private function GetRequiredHeaders() {
+        return 
+            Array(
+                'X-Unity-Session: ' . $this->GetXUnitySessionCookie(),
+                'X-Requested-With: XMLHttpRequest'
+                );
+    }
+
+    private function AssertIsNotLoggedIn() {
+        if ($this->IsLoggedIn()) {
+            throw new AssetStoreException('Login already performed');
+        }
     }
 
     private static function AssertHttpCode($message, $code) {
@@ -314,12 +334,6 @@ class Client {
     private function AssertIsLoggedIn() {
         if (!$this->IsLoggedIn()) {
             throw new AssetStoreException('Can\'t execute operation when not logged in');
-        }
-    }
-
-    private function AssertIsNotLoggedIn() {
-        if ($this->IsLoggedIn()) {
-            throw new AssetStoreException('Login already performed');
         }
     }
 }
