@@ -19,6 +19,7 @@ Not implemented:
 * Viewing/saving publisher info
 
 Usage examples:
+
 [Purchases E-mail Notifier](https://gist.github.com/LostPolygon/280d031052293679ef54)
 
 Licensed under Apache 2.0.
