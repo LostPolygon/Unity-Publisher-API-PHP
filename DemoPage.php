@@ -43,7 +43,7 @@
     // Create the client instance
     $store = new AssetStore\Client();
 
-    // Login with your credentials
+    // Login with your credentials. Return value of this call is the login token that can be used with LoginWithToken method
     $store->Login('your@publisher.email.com', 'password');
 
     // Or, if you don't want to keep your credentials in the code, use the token (returned by Login() method or retrieved from your browser cookies)
@@ -67,10 +67,24 @@
 <li>Support email: <?php echo $publisherInfo->GetSupportEmail(); ?></li>
 </ul>
 
+<?php
+    $salesPeriods = $store->FetchSalesPeriods();
+    $salesYear = reset($salesPeriods)->GetYear();
+    $salesMonth = reset($salesPeriods)->GetMonth();
+
+    if (isset($_POST['selectedPeriod'])) {
+        $periodArray = explode('-', $_POST['selectedPeriod']);
+        $salesYear = $periodArray[0];
+        $salesMonth = $periodArray[1];
+    }
+
+    $sales = $store->FetchSales($salesYear, $salesMonth);
+    $downloads = $store->FetchDownloads($salesYear, $salesMonth);
+?>
+
 <h2>Sales periods</h2>
 <ul>
 <?php
-    $salesPeriods = $store->FetchSalesPeriods();
     foreach ($salesPeriods as $value) {
         echo sprintf('<li>Month: %d, year: %d, formatted: %s</li>', 
                      $value->GetMonth(), 
@@ -93,20 +107,6 @@ Period: <select name="selectedPeriod" onChange="document.forms['asForm'].submit(
 ?>
 </select>
 <h3>Sales</h3>
-<?php
-    $salesYear = reset($salesPeriods)->GetYear();
-    $salesMonth = reset($salesPeriods)->GetMonth();
-
-    if (isset($_POST['selectedPeriod'])) {
-        $periodArray = explode('-', $_POST['selectedPeriod']);
-        $salesYear = $periodArray[0];
-        $salesMonth = $periodArray[1];
-    }
-
-    $sales = $store->FetchSales($salesYear, $salesMonth);
-    $downloads = $store->FetchDownloads($salesYear, $salesMonth);
-?>
-
 <h4>Gross: $<?php echo $sales->GetRevenueGross(); ?>, net: $<?php echo $sales->GetRevenueNet(); ?> (<?php echo $sales->GetPayoutCut() * 100; ?>%)</h4>
 <table>
 <tr><th>Package name</th><th>Price ($)</th><th>Qty</th><th>Refunds</th><th>Chargebacks</th><th>Gross ($)</th><th>First</th><th>Last</th></tr>

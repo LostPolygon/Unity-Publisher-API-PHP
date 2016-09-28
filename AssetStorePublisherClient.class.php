@@ -4,20 +4,19 @@ namespace AssetStore;
 class AssetStoreException extends \Exception { }
 
 class Client {
-    const LOGIN_URL = 'https://publisher.assetstore.unity3d.com/login';
     const LOGOUT_URL = 'https://publisher.assetstore.unity3d.com/logout';
     const SALES_URL = 'https://publisher.assetstore.unity3d.com/sales.html';
     const USER_OVERVIEW_JSON_URL = 'https://publisher.assetstore.unity3d.com/api/user/overview.json';
     const PUBLISHER_OVERVIEW_JSON_URL = 'https://publisher.assetstore.unity3d.com/api/publisher/overview.json';
-    const SALES_PERIODS_JSON_URL = 'https://publisher.assetstore.unity3d.com/api/publisher-info/months/{publisher_id}.json';
-    const SALES_JSON_URL = 'https://publisher.assetstore.unity3d.com/api/publisher-info/sales/{publisher_id}/{year}{month}.json';
-    const DOWNLOADS_JSON_URL = 'https://publisher.assetstore.unity3d.com/api/publisher-info/downloads/{publisher_id}/{year}{month}.json';
-    const INVOICE_VERIFY_JSON_URL = 'https://publisher.assetstore.unity3d.com/api/publisher-info/verify-invoice/{publisher_id}/{invoice_id}.json';
-    const REVENUE_JSON_URL = 'https://publisher.assetstore.unity3d.com/api/publisher-info/revenue/{publisher_id}.json';
+    const SALES_PERIODS_JSON_URL = 'https://publisher.assetstore.unity3d.com/api/publisher-info/months/{publisherId}.json';
+    const SALES_JSON_URL = 'https://publisher.assetstore.unity3d.com/api/publisher-info/sales/{publisherId}/{year}{month}.json';
+    const DOWNLOADS_JSON_URL = 'https://publisher.assetstore.unity3d.com/api/publisher-info/downloads/{publisherId}/{year}{month}.json';
+    const INVOICE_VERIFY_JSON_URL = 'https://publisher.assetstore.unity3d.com/api/publisher-info/verify-invoice/{publisherId}/{invoiceId}.json';
+    const REVENUE_JSON_URL = 'https://publisher.assetstore.unity3d.com/api/publisher-info/revenue/{publisherId}.json';
     const PACKAGES_JSON_URL = 'https://publisher.assetstore.unity3d.com/api/management/packages.json';
-    const API_KEY_JSON_URL = 'https://publisher.assetstore.unity3d.com/api/publisher-info/api-key/{publisher_id}.json';
-    const LOGIN_TOKEN = '26c4202eb475d02864b40827dfff11a14657aa41';
+    const API_KEY_JSON_URL = 'https://publisher.assetstore.unity3d.com/api/publisher-info/api-key/{publisherId}.json';
     const USER_AGENT = 'Mozilla/5.0 (Windows NT 6.3; rv:27.0) Gecko/20100101 Firefox/27.0';
+    const TOKEN_COOKIE_NAME = 'kharma_session';
 
     private $loginToken;
     private $isLoggedIn = false;
@@ -30,7 +29,7 @@ class Client {
 
         $this->loginToken = $token;
         $this->isLoggedIn = true;
-        $this->cookies['xunitysession'] = $this->GetXUnitySessionCookie();
+        $this->cookies[self::TOKEN_COOKIE_NAME] = $this->loginToken;
     }
 
     public function Login($user, $password) {
@@ -45,15 +44,14 @@ class Client {
     public function Logout() {
         $this->AssertIsLoggedIn();
 
-        $result = $this->GetSimpleData(Array('url' => self::LOGOUT_URL));
-        self::AssertHttpCode('Logout failed, error code {code}', $result['http_code']);
+        $this->GetSimpleData(Array('url' => self::LOGOUT_URL), $resultData, $resultHttpCode);
+        self::AssertHttpCode('Logout failed, error code {code}', $resultHttpCode);
 
-        unset($this->cookies['xunitysession']);
+        unset($this->cookies[self::TOKEN_COOKIE_NAME]);
         $this->userInfoOverview = null;
         $this->publisherInfoOverview = null;
         $this->isLoggedIn = false;
     }
-
 
     public function IsLoggedIn() {
         return $this->isLoggedIn;
@@ -63,10 +61,10 @@ class Client {
         $this->AssertIsLoggedIn();
 
         if ($this->userInfoOverview === null) {
-            $result = $this->GetSimpleData(Array('url' => self::USER_OVERVIEW_JSON_URL));
-            self::AssertHttpCode('Fetching user data failed, error code {code}', $result['http_code']);
+            $result = $this->GetSimpleData(Array('url' => self::USER_OVERVIEW_JSON_URL), $resultData, $resultHttpCode);
+            self::AssertHttpCode('Fetching user data failed, error code {code}', $resultHttpCode);
     
-            $this->userInfoOverview = json_decode($result['data']); 
+            $this->userInfoOverview = json_decode($resultData); 
         }
 
         return $this->userInfoOverview;
@@ -76,10 +74,10 @@ class Client {
         $this->AssertIsLoggedIn();
 
         if ($this->publisherInfoOverview === null) {
-            $result = $this->GetSimpleData(Array('url' => self::PUBLISHER_OVERVIEW_JSON_URL));
-            self::AssertHttpCode('Fetching publisher data failed, error code {code}', $result['http_code']);
+            $result = $this->GetSimpleData(Array('url' => self::PUBLISHER_OVERVIEW_JSON_URL), $resultData, $resultHttpCode);
+            self::AssertHttpCode('Fetching publisher data failed, error code {code}', $resultHttpCode);
     
-            $publisherInfoObject = json_decode($result['data']);
+            $publisherInfoObject = json_decode($resultData);
             $this->publisherInfoOverview = new PublisherInfo($publisherInfoObject);
         }
 
@@ -87,22 +85,22 @@ class Client {
     }
 
     public function FetchApiKey() {
-        $url = str_replace('{publisher_id}', $this->GetPublisherInfo()->GetId(), self::API_KEY_JSON_URL);
-        $result = $this->GetSimpleData(Array('url' => $url));
-        self::AssertHttpCode('Fetching API key failed, error code {code}', $result['http_code']);
+        $url = str_replace('{publisherId}', $this->GetPublisherInfo()->GetId(), self::API_KEY_JSON_URL);
+        $result = $this->GetSimpleData(Array('url' => $url), $resultData, $resultHttpCode);
+        self::AssertHttpCode('Fetching API key failed, error code {code}', $resultHttpCode);
 
-        $keyDataObject = json_decode($result['data']);
+        $keyDataObject = json_decode($resultData);
         return $keyDataObject->api_key;
     }
 
     public function FetchSalesPeriods() {
         $this->AssertIsLoggedIn();
 
-        $url = str_replace('{publisher_id}', $this->GetPublisherInfo()->GetId(), self::SALES_PERIODS_JSON_URL);
-        $result = $this->GetSimpleData(Array('url' => $url));
-        self::AssertHttpCode('Fetching sales periods failed, error code {code}', $result['http_code']);
+        $url = str_replace('{publisherId}', $this->GetPublisherInfo()->GetId(), self::SALES_PERIODS_JSON_URL);
+        $result = $this->GetSimpleData(Array('url' => $url), $resultData, $resultHttpCode);
+        self::AssertHttpCode('Fetching sales periods failed, error code {code}', $resultHttpCode);
 
-        $salesPeriods = json_decode($result['data']);
+        $salesPeriods = json_decode($resultData);
 
         $infoArray = Array();
         foreach ($salesPeriods->periods as $value) {
@@ -115,11 +113,11 @@ class Client {
     public function FetchRevenue() {
         $this->AssertIsLoggedIn();
 
-        $url = str_replace('{publisher_id}', $this->GetPublisherInfo()->GetId(), self::REVENUE_JSON_URL);
-        $result = $this->GetSimpleData(Array('url' => $url));
-        self::AssertHttpCode('Fetching sales periods failed, error code {code}', $result['http_code']);
+        $url = str_replace('{publisherId}', $this->GetPublisherInfo()->GetId(), self::REVENUE_JSON_URL);
+        $result = $this->GetSimpleData(Array('url' => $url), $resultData, $resultHttpCode);
+        self::AssertHttpCode('Fetching sales periods failed, error code {code}', $resultHttpCode);
 
-        $infoObject = json_decode($result['data']);
+        $infoObject = json_decode($resultData);
 
         $infoArray = Array();
         foreach ($infoObject->aaData as $value) {
@@ -132,11 +130,11 @@ class Client {
     public function FetchPackages() {
         $this->AssertIsLoggedIn();
 
-        $url = str_replace('{publisher_id}', $this->GetPublisherInfo()->GetId(), self::PACKAGES_JSON_URL);
-        $result = $this->GetSimpleData(Array('url' => $url));
-        self::AssertHttpCode('Fetching packages failed, error code {code}', $result['http_code']);
+        $url = str_replace('{publisherId}', $this->GetPublisherInfo()->GetId(), self::PACKAGES_JSON_URL);
+        $result = $this->GetSimpleData(Array('url' => $url), $resultData, $resultHttpCode);
+        self::AssertHttpCode('Fetching packages failed, error code {code}', $resultHttpCode);
 
-        $infoObject = json_decode($result['data']);
+        $infoObject = json_decode($resultData);
 
         $infoArray = Array();
         foreach ($infoObject->packages as $value) {
@@ -144,32 +142,6 @@ class Client {
         }
 
         return $infoArray;
-    }
-
-    public function VerifyInvoice($invoiceNumbers) {
-        $this->AssertIsLoggedIn();
-
-        if (!is_array($invoiceNumbers)) {
-            $invoiceNumbers = preg_split("#[\s,]+#", $invoiceNumbers, 0, PREG_SPLIT_NO_EMPTY);
-        }
-        foreach ($invoiceNumbers as &$value) {
-            $value = preg_replace('#[^0-9]#', '', $value);
-        }
-        unset($value);
-        $invoiceNumbers = implode(',', $invoiceNumbers);
-        $url = str_replace(Array('{publisher_id}', '{invoice_id}'),
-                           Array($this->GetPublisherInfo()->GetId(), urlencode($invoiceNumbers)), 
-                           self::INVOICE_VERIFY_JSON_URL);
-        $result = $this->GetSimpleData(Array('url' => $url));
-        self::AssertHttpCode('Invoice verification failed, error code {code}', $result['http_code']);
-
-        $invoiceInfoObject = json_decode($result['data']);
-        $invoiceInfo = Array();
-        foreach ($invoiceInfoObject->aaData as $value) {
-            $invoiceInfo[] = new InvoiceInfo($value);
-        }
-
-        return $invoiceInfo;
     }
 
     public function FetchSales($year, $month) {
@@ -186,13 +158,13 @@ class Client {
         }
 
         $month = str_pad($month, 2, '0', STR_PAD_LEFT);
-        $url = str_replace(Array('{publisher_id}', '{year}', '{month}'), 
+        $url = str_replace(Array('{publisherId}', '{year}', '{month}'), 
                            Array($this->GetPublisherInfo()->GetId(), $year, $month), 
                            self::SALES_JSON_URL);
-        $result = $this->GetSimpleData(Array('url' => $url));
-        self::AssertHttpCode('Fetching sales failed, error code {code}', $result['http_code']);
+        $result = $this->GetSimpleData(Array('url' => $url), $resultData, $resultHttpCode);
+        self::AssertHttpCode('Fetching sales failed, error code {code}', $resultHttpCode);
 
-        $salesInfoObject = json_decode($result['data']);
+        $salesInfoObject = json_decode($resultData);
         $salesInfo = Array();
 
         foreach ($salesInfoObject->aaData as $key => $value) {
@@ -217,13 +189,13 @@ class Client {
         }
 
         $month = str_pad($month, 2, '0', STR_PAD_LEFT);
-        $url = str_replace(Array('{publisher_id}', '{year}', '{month}'), 
+        $url = str_replace(Array('{publisherId}', '{year}', '{month}'), 
                            Array($this->GetPublisherInfo()->GetId(), $year, $month), 
                            self::DOWNLOADS_JSON_URL);
-        $result = $this->GetSimpleData(Array('url' => $url));
-        self::AssertHttpCode('Fetching downloads failed, error code {code}', $result['http_code']);
+        $result = $this->GetSimpleData(Array('url' => $url), $resultData, $resultHttpCode);
+        self::AssertHttpCode('Fetching downloads failed, error code {code}', $resultHttpCode);
 
-        $downloadsInfoObject = json_decode($result['data']);
+        $downloadsInfoObject = json_decode($resultData);
         $downloadsInfo = Array();
 
         foreach ($downloadsInfoObject->aaData as $key => $value) {
@@ -234,89 +206,162 @@ class Client {
         return new PeriodDownloadsInfo($downloadsInfo);
     }
 
-    private function SetupCurlQuery($params) {
-        if (isset($params['query'])) {
-            $query = http_build_query($params['query']);
+    public function VerifyInvoice($invoiceNumbers) {
+        $this->AssertIsLoggedIn();
+
+        if (!is_array($invoiceNumbers)) {
+            $invoiceNumbers = preg_split("#[\s,]+#", $invoiceNumbers, 0, PREG_SPLIT_NO_EMPTY);
+        }
+        foreach ($invoiceNumbers as &$value) {
+            $value = preg_replace('#[^0-9]#', '', $value);
+        }
+        unset($value);
+        $invoiceNumbers = implode(',', $invoiceNumbers);
+        $url = str_replace(Array('{publisherId}', '{invoiceId}'),
+                           Array($this->GetPublisherInfo()->GetId(), urlencode($invoiceNumbers)), 
+                           self::INVOICE_VERIFY_JSON_URL);
+        $result = $this->GetSimpleData(Array('url' => $url), $resultData, $resultHttpCode);
+        self::AssertHttpCode('Invoice verification failed, error code {code}', $resultHttpCode);
+
+        $invoiceInfoObject = json_decode($resultData);
+        $invoiceInfo = Array();
+        foreach ($invoiceInfoObject->aaData as $value) {
+            $invoiceInfo[] = new InvoiceInfo($value);
         }
 
-        $cookies = http_build_query($this->cookies, '', '; ');
-        $headers = Array();
-        if (isset($params['headers'])) {
-            $headers = array_merge($headers, $params['headers']);
-        }
-
-        $ch = curl_init();
-        curl_setopt($ch, CURLOPT_USERAGENT, self::USER_AGENT);
-        curl_setopt($ch, CURLOPT_URL, $params['url']);
-        curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
-        curl_setopt($ch, CURLOPT_HEADER, 0);
-        if (isset($params['query'])) {
-            curl_setopt($ch, CURLOPT_POST, 1);
-            curl_setopt($ch, CURLOPT_POSTFIELDS, $query);
-        }
-        curl_setopt($ch, CURLOPT_COOKIE, $cookies);
-        curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
-        curl_setopt($ch, CURLOPT_REFERER, isset($params['referer']) ? $params['referer'] : $params['url']);
-        curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);  
-
-        return $ch;
+        return $invoiceInfo;
     }
 
-    private function GetSimpleData($params) {
-        if (isset($params['headers'])) {
-            $params['headers'] = array_merge($params['headers'], $this->GetRequiredHeaders());
-        } else {
-            $params['headers'] = $this->GetRequiredHeaders();
-        }
+    private function SetupCurlQuery($params) {
+        $params['cookies'] = $this->cookies;
+        return self::SetupCurlQueryInternal($params);
+    }
 
+    private function GetSimpleData($params, &$resultData, &$resultHttpCode) {
         $result = Array();
 
         $ch = $this->SetupCurlQuery($params); 
-        $result['data'] = curl_exec($ch);
+        $resultData = curl_exec($ch);
         $curlError = curl_error($ch);
-        $result['http_code'] = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $resultHttpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
         curl_close($ch);
-        if (!empty($curlError)) {
+        if (!empty($curlError))
             throw new AssetStoreException("CURL error occured: {$curlError}");
-        }
-
-        return $result;
     }
 
     private function GetLoginToken($user, $password) {
-        $query = 
-            Array(
-                'user' => $user, 
-                'pass' => $password,
-                'skip_terms' => 'true'
+        // Phase 1: get Unity authorize redirect URL
+        self::ExecuteCurlQuery(
+                Array('url' => self::SALES_URL,
+                      'getHeaders' => true),
+                $resultData,
+                $resultHttpCode
             );
 
-        $ch = self::SetupCurlQuery(Array('url' => self::LOGIN_URL, 
-                                         'query' => $query,
-                                         'headers' => $this->GetRequiredHeaders())); 
-        $result_data = curl_exec($ch);
-        $result_http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        curl_close($ch);
+        self::AssertHttpCode('Login failed at phase 1, error code {code}', $resultHttpCode);
 
-        self::AssertHttpCode('Login failed, error code {code}', $result_http_code);
+        $resultHeaders = self::GetHeadersFromCurlResponse($resultData);
+        $redirectUrl = self::GetHeaderFromHeaderArray($resultHeaders, 'Location');
+        $redirectUrl = $redirectUrl['value'];
 
-        return trim($result_data);
-    }
+        // Phase 2: get Unity ID redirect URL
+        self::ExecuteCurlQuery(
+                Array('url' => $redirectUrl,
+                      'getHeaders' => true),
+                $resultData,
+                $resultHttpCode
+            );
 
-    private function GetXUnitySessionCookie() {
-        if ($this->isLoggedIn) {
-            return $this->loginToken;
-        } else {
-            return self::LOGIN_TOKEN;
-        }
-    }
+        self::AssertHttpCode('Login failed at phase 2, error code {code}', $resultHttpCode);
 
-    private function GetRequiredHeaders() {
-        return 
-            Array(
-                'X-Unity-Session: ' . $this->GetXUnitySessionCookie(),
-                'X-Requested-With: XMLHttpRequest'
-                );
+        $resultHeaders = self::GetHeadersFromCurlResponse($resultData);
+        $redirectUrl = self::GetHeaderFromHeaderArray($resultHeaders, 'Location');
+        $redirectUrl = $redirectUrl['value'];
+
+        // Phase 3: load Unity ID authorization page
+        self::ExecuteCurlQuery(
+                Array('url' => $redirectUrl,
+                      'getHeaders' => true),
+                $resultData,
+                $resultHttpCode
+            );
+
+        self::AssertHttpCode('Login failed at phase 3, error code {code}', $resultHttpCode);
+        $resultHeaders = self::GetHeadersFromCurlResponse($resultData);
+
+        $genesisAuthFrontendCookieName = '_genesis_auth_frontend_session';
+        $setCookieHeader = self::GetHeaderFromHeaderArray($resultHeaders, 'Set-Cookie', $genesisAuthFrontendCookieName);
+        $parsedCookie = self::ParseCookies($setCookieHeader['value']);
+        $genesisAuthFrontendCookieValue = @urldecode($parsedCookie[0][$genesisAuthFrontendCookieName]);
+        if ($genesisAuthFrontendCookieValue == null)
+            throw new AssetStoreException($genesisAuthFrontendCookieName . ' cookie not found');
+
+        // Get authenticity token from HTML
+        $authenticityTokenMatches = Array();
+        preg_match('#<input type="hidden" name="authenticity_token" value="(.+)" />#', $resultData, $authenticityTokenMatches);
+        $authenticityToken = $authenticityTokenMatches[1];
+
+        // Phase 4: send login data and get authorization URL
+        $loginQuery = Array(
+                'utf8' => '✓',
+                '_method' => 'put',
+                'authenticity_token' => $authenticityToken,
+                'conversations_create_session_form[email]' => $user,
+                'conversations_create_session_form[password]' => $password,
+                'conversations_create_session_form[remember_me]' => 'true',
+                'commit' => 'Log in'
+            );
+
+        self::ExecuteCurlQuery(
+                Array('url' => $redirectUrl,
+                      'query' => $loginQuery,
+                      'cookies' => Array($genesisAuthFrontendCookieName => $genesisAuthFrontendCookieValue),
+                      'getHeaders' => true),
+                $resultData,
+                $resultHttpCode
+            );
+
+        self::AssertHttpCode('Login failed at phase 4, error code {code}', $resultHttpCode);
+
+        $resultHeaders = self::GetHeadersFromCurlResponse($resultData);
+        $redirectUrl = self::GetHeaderFromHeaderArray($resultHeaders, 'Location');
+        $redirectUrl = $redirectUrl['value'];
+
+        // Phase 5: get "bounce" page URL
+        self::ExecuteCurlQuery(
+                Array('url' => $redirectUrl,
+                      'getHeaders' => true),
+                $resultData,
+                $resultHttpCode
+            );
+        self::AssertHttpCode('Login failed at phase 5, error code {code}', $resultHttpCode);
+
+        $resultHeaders = self::GetHeadersFromCurlResponse($resultData);
+        $redirectUrl = self::GetHeaderFromHeaderArray($resultHeaders, 'Location');
+        $redirectUrl = $redirectUrl['value'];
+
+        // Phase 6: get "bounce" page
+        self::ExecuteCurlQuery(
+                Array('url' => $redirectUrl,
+                      'getHeaders' => true),
+                $resultData,
+                $resultHttpCode
+            );
+        self::AssertHttpCode('Login failed at phase 6, error code {code}', $resultHttpCode);
+
+        $resultHeaders = self::GetHeadersFromCurlResponse($resultData);
+        $redirectUrl = self::GetHeaderFromHeaderArray($resultHeaders, 'Location');
+        $redirectUrl = $redirectUrl['value'];
+
+        $kharmaSessionSetCookieHeader = self::GetHeaderFromHeaderArray($resultHeaders, 'Set-Cookie', self::TOKEN_COOKIE_NAME);
+        if ($kharmaSessionSetCookieHeader == null)
+            throw new AssetStoreException(self::TOKEN_COOKIE_NAME . ' cookie not found');
+
+        $kharmaSessionParsedCookie = self::ParseCookies($kharmaSessionSetCookieHeader['value']);
+        $kharmaSession = @urldecode($kharmaSessionParsedCookie[0][self::TOKEN_COOKIE_NAME]);
+        $kharmaSession = trim($kharmaSession);
+
+        return $kharmaSession;
     }
 
     private function AssertIsNotLoggedIn() {
@@ -327,7 +372,7 @@ class Client {
 
     private static function AssertHttpCode($message, $code) {
         if (HttpUtilities::IsErrorCode($code)) {
-            throw new AssetStoreException(str_replace('{code}', $code . ' (' . HttpUtilities::GetStatusMessage($code) . ')', $message));
+            throw new AssetStoreException(str_replace('{code}', $code . ' (' . HttpUtilities::GetStatusMessage($code) . ')', $message), $code);
         }
     }
   
@@ -335,6 +380,104 @@ class Client {
         if (!$this->IsLoggedIn()) {
             throw new AssetStoreException('Can\'t execute operation when not logged in');
         }
+    }
+
+    private static function GetHeaderFromHeaderArray($cookieArray, $cookieKey, $cookieValueStart = null) {
+        foreach ($cookieArray as $value) {
+            if ($value['key'] == $cookieKey && ($cookieValueStart == null || strpos($value['value'], $cookieValueStart) === 0))
+                return $value;
+        }
+
+        return null;
+    }
+
+    private static function ExecuteCurlQuery($params, &$resultData, &$resultHttpCode) {
+        $ch = self::SetupCurlQueryInternal($params); 
+        $resultData = curl_exec($ch);
+        $resultHttpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+    }
+
+    private static function SetupCurlQueryInternal($params) {
+        if (isset($params['query'])) {
+            $query = http_build_query($params['query']);
+        }
+
+        $cookies = isset($params['cookies']) ? http_build_query($params['cookies'], '', '; ') : null;
+        $headers = Array();
+        if (isset($params['headers'])) {
+            $headers = array_merge($headers, $params['headers']);
+        }
+
+        $ch = curl_init();
+        curl_setopt($ch, CURLOPT_USERAGENT, self::USER_AGENT);
+        curl_setopt($ch, CURLOPT_URL, $params['url']);
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch, CURLOPT_HEADER, isset($params['getHeaders']) && $params['getHeaders']);
+        if (isset($query)) {
+            curl_setopt($ch, CURLOPT_POST, true);
+            curl_setopt($ch, CURLOPT_POSTFIELDS, $query);
+        }
+        if ($cookies != null) {
+            curl_setopt($ch, CURLOPT_COOKIE, $cookies);
+        }
+        curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
+        curl_setopt($ch, CURLOPT_REFERER, isset($params['referer']) ? $params['referer'] : $params['url']);
+        curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);  
+
+        return $ch;
+    }
+
+    private static function GetHeadersFromCurlResponse($response) {
+        $headers = array();
+        $headerText = substr($response, 0, strpos($response, "\r\n\r\n"));
+    
+        foreach (explode("\r\n", $headerText) as $i => $line) {
+            if ($i === 0) {
+                // HTTP response code, ignore
+                //$headers['httpCode'] = $line;
+            } else {
+                list($key, $value) = explode(': ', $line);
+                $headers[] = Array('key' => $key, 'value' => $value);
+            }
+        }
+    
+        return $headers;
+    }
+
+    // https://gist.github.com/pokeb/10590
+    private static function ParseCookies($header) {
+        $cookies = Array();
+        $cookie = Array();
+        $parts = explode('=', $header);
+        $partsCount = count($parts);
+
+        for ($i = 0; $i < $partsCount; $i++) {
+            $part = $parts[$i];
+            if ($i==0) {
+                $key = $part;
+                continue;
+            } elseif ($i == $partsCount - 1) {
+                $cookie[$key] = $part;
+                $cookies[] = $cookie;
+                continue;
+            }
+
+            $comps = explode(" ", $part);
+            $newKey = $comps[count($comps) - 1];
+            $value = substr($part, 0, strlen($part) - strlen($newKey) - 1);
+            $terminator = substr($value, -1);
+            $value = substr($value, 0, strlen($value) - 1);
+            $cookie[$key] = $value;
+            if ($terminator == ",") {
+                $cookies[] = $cookie;
+                $cookie = Array();
+            }
+            
+            $key = $newKey;
+        }
+
+        return $cookies;
     }
 }
 
@@ -867,52 +1010,68 @@ class PackageInfo extends ParsedData {
 
 class HttpUtilities {
     private static $errorMessages = Array(
-        // [Informational 1xx]    
-        100 => 'Continue',    
-        101 => 'Switching Protocols',    
-        // [Successful 2xx]    
-        200 => 'OK',    
-        201 => 'Created',    
-        202 => 'Accepted',    
-        203 => 'Non-Authoritative Information',    
-        204 => 'No Content',    
-        205 => 'Reset Content',    
-        206 => 'Partial Content',    
-        // [Redirection 3xx]    
-        300 => 'Multiple Choices',    
-        301 => 'Moved Permanently',    
-        302 => 'Found',    
-        303 => 'See Other',    
-        304 => 'Not Modified',    
-        305 => 'Use Proxy',    
-        306 => '(Unused)',    
-        307 => 'Temporary Redirect',    
-        // [Client Error 4xx]    
-        400 => 'Bad Request',    
-        401 => 'Unauthorized',    
-        402 => 'Payment Required',    
-        403 => 'Forbidden',    
-        404 => 'Not Found',    
-        405 => 'Method Not Allowed',    
-        406 => 'Not Acceptable',    
-        407 => 'Proxy Authentication Required',    
-        408 => 'Request Timeout',    
-        409 => 'Conflict',    
-        410 => 'Gone',    
-        411 => 'Length Required',    
-        412 => 'Precondition Failed',    
-        413 => 'Request Entity Too Large',    
-        414 => 'Request-URI Too Long',    
-        415 => 'Unsupported Media Type',    
-        416 => 'Requested Range Not Satisfiable',    
-        417 => 'Expectation Failed',    
-        // [Server Error 5xx]    
-        500 => 'Internal Server Error',    
-        501 => 'Not Implemented',    
-        502 => 'Bad Gateway',    
-        503 => 'Service Unavailable',    
-        504 => 'Gateway Timeout',    
-        505 => 'HTTP Version Not Supported'
+        // 1xx Info / Informational
+        100 => 'Continue',
+        101 => 'Switching Protocols',
+        102 => 'Processing',
+        // 2xx Success / OK',
+        200 => 'OK',
+        201 => 'Created',
+        202 => 'Accepted',
+        203 => 'Non-Authoritative Information',
+        204 => 'No Content',
+        205 => 'Reset Content',
+        206 => 'Partial Content',
+        207 => 'Multi-Status',
+        208 => 'Already Reported',
+        226 => 'IM Used',
+        // 3xx Redirect',
+        300 => 'Multiple Choices',
+        301 => 'Moved Permanently',
+        302 => 'Found',
+        303 => 'See Other',
+        304 => 'Not Modified',
+        305 => 'Use Proxy',
+        307 => 'Temporary Redirect',
+        308 => 'Permanent Redirect',
+        //4xx Client Error',
+        400 => 'Bad Request',
+        401 => 'Unauthorized',
+        402 => 'Payment Required',
+        403 => 'Forbidden',
+        404 => 'Not Found',
+        405 => 'Method Not Allowed',
+        406 => 'Not Acceptable',
+        407 => 'Proxy Authentication Required',
+        408 => 'Request Timeout',
+        409 => 'Conflict',
+        410 => 'Gone',
+        411 => 'Length Required',
+        412 => 'Precondition Failed',
+        413 => 'Request Entity Too Large',
+        414 => 'Request-URI Too Long',
+        415 => 'Unsupported Media Type',
+        416 => 'Requested Range Not Satisfiable',
+        417 => 'Expectation Failed',
+        422 => 'Unprocessable Entity',
+        423 => 'Locked',
+        424 => 'Failed Dependency',
+        426 => 'Upgrade Required',
+        428 => 'Precondition Required',
+        429 => 'Too Many Requests',
+        431 => 'Request Header Fields Too Large',
+        // 5xx Server Error',
+        500 => 'Internal Server Error',
+        501 => 'Not Implemented',
+        502 => 'Bad Gateway',
+        503 => 'Service Unavailable',
+        504 => 'Gateway Timeout',
+        505 => 'HTTP Version Not Supported',
+        506 => 'Variant Also Negotiates',
+        507 => 'Insufficient Storage',
+        508 => 'Loop Detected',
+        510 => 'Not Extended',
+        511 => 'Network Authentication Required'
     );
 
     public static function IsErrorCode($code) {
