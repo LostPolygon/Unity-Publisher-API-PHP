@@ -287,19 +287,23 @@ class Client {
             );
 
         self::AssertHttpCode('Login failed at phase 3, error code {code}', $resultHttpCode);
+        
         $resultHeaders = self::GetHeadersFromCurlResponse($resultData);
 
         $genesisAuthFrontendCookieName = '_genesis_auth_frontend_session';
         $setCookieHeader = self::GetHeaderFromHeaderArray($resultHeaders, 'Set-Cookie', $genesisAuthFrontendCookieName);
+
         $parsedCookie = self::ParseCookies($setCookieHeader['value']);
         $genesisAuthFrontendCookieValue = @urldecode($parsedCookie[0][$genesisAuthFrontendCookieName]);
         if ($genesisAuthFrontendCookieValue == null)
-            throw new AssetStoreException($genesisAuthFrontendCookieName . ' cookie not found');
+            throw new AssetStoreException($genesisAuthFrontendCookieName . ' cookie not found (phase 3)');
 
         // Get authenticity token from HTML
         $authenticityTokenMatches = Array();
         preg_match('#<input type="hidden" name="authenticity_token" value="(.+)" />#', $resultData, $authenticityTokenMatches);
-        $authenticityToken = $authenticityTokenMatches[1];
+        $authenticityToken = @$authenticityTokenMatches[1];
+        if ($authenticityToken == null)
+            throw new AssetStoreException('Page authenticity token not found (phase 3)');
 
         // Phase 4: send login data and get authorization URL
         $loginQuery = Array(
@@ -334,6 +338,7 @@ class Client {
                 $resultData,
                 $resultHttpCode
             );
+
         self::AssertHttpCode('Login failed at phase 5, error code {code}', $resultHttpCode);
 
         $resultHeaders = self::GetHeadersFromCurlResponse($resultData);
@@ -347,6 +352,7 @@ class Client {
                 $resultData,
                 $resultHttpCode
             );
+
         self::AssertHttpCode('Login failed at phase 6, error code {code}', $resultHttpCode);
 
         $resultHeaders = self::GetHeadersFromCurlResponse($resultData);
@@ -371,9 +377,17 @@ class Client {
     }
 
     private static function AssertHttpCode($message, $code) {
-        if (HttpUtilities::IsErrorCode($code)) {
-            throw new AssetStoreException(str_replace('{code}', $code . ' (' . HttpUtilities::GetStatusMessage($code) . ')', $message), $code);
+        $isError = HttpUtilities::IsErrorCode($code);
+        $isNotKnownCode = !HttpUtilities::IsKnownCode($code);
+        if (!($isError || $isNotKnownCode))
+            return;
+
+        $httpStatusMmessage = "Unknown HTTP response code";
+        if ($isError) {
+            $httpStatusMmessage = HttpUtilities::GetStatusMessage($code);
         }
+
+        throw new AssetStoreException(str_replace('{code}', $code . ' (' . $httpStatusMmessage . ')', $message), $code);
     }
   
     private function AssertIsLoggedIn() {
@@ -394,8 +408,11 @@ class Client {
     private static function ExecuteCurlQuery($params, &$resultData, &$resultHttpCode) {
         $ch = self::SetupCurlQueryInternal($params); 
         $resultData = curl_exec($ch);
+        $curlError = curl_error($ch);
         $resultHttpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
         curl_close($ch);
+        if (!empty($curlError))
+            throw new AssetStoreException("CURL error occured: {$curlError}");
     }
 
     private static function SetupCurlQueryInternal($params) {
@@ -1081,6 +1098,10 @@ class HttpUtilities {
 
     public static function GetStatusMessage($code) {
         return self::$errorMessages[$code];
+    }
+
+    public static function IsKnownCode($code) {
+        return array_key_exists($code, self::$errorMessages);
     }
 
     // http://w-shadow.com/blog/2008/07/05/how-to-get-redirect-url-in-php/
