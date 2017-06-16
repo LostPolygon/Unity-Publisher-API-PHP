@@ -20,7 +20,7 @@ Not implemented:
 
 Usage examples:
 
-[Purchases E-mail Notifier](https://gist.github.com/LostPolygon/280d031052293679ef54)
+[Purchases E-mail Notifier](https://gist.github.com/ZimM-LostPolygon/280d031052293679ef54)
 
 Licensed under Apache 2.0.
 
