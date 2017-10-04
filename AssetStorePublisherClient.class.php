@@ -232,23 +232,6 @@ class Client {
         return $invoiceInfo;
     }
 
-    private function SetupCurlQuery($params) {
-        $params['cookies'] = $this->cookies;
-        return self::SetupCurlQueryInternal($params);
-    }
-
-    private function GetSimpleData($params, &$resultData, &$resultHttpCode) {
-        $result = Array();
-
-        $ch = $this->SetupCurlQuery($params); 
-        $resultData = curl_exec($ch);
-        $curlError = curl_error($ch);
-        $resultHttpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        curl_close($ch);
-        if (!empty($curlError))
-            throw new AssetStoreException("CURL error occured: {$curlError}");
-    }
-
     private function GetLoginToken($user, $password) {
         // Phase 1: get Unity authorize redirect URL
         self::ExecuteCurlQuery(
@@ -260,7 +243,7 @@ class Client {
 
         self::AssertHttpCode('Login failed at phase 1, error code {code}', $resultHttpCode);
 
-        $resultHeaders = self::GetHeadersFromCurlResponse($resultData);
+        $resultHeaders = self::GetHeadersFromHttpResponse($resultData);
         $redirectUrl = self::GetHeaderFromHeaderArray($resultHeaders, 'Location');
         $redirectUrl = $redirectUrl['value'];
 
@@ -274,7 +257,7 @@ class Client {
 
         self::AssertHttpCode('Login failed at phase 2, error code {code}', $resultHttpCode);
 
-        $resultHeaders = self::GetHeadersFromCurlResponse($resultData);
+        $resultHeaders = self::GetHeadersFromHttpResponse($resultData);
         $redirectUrl = self::GetHeaderFromHeaderArray($resultHeaders, 'Location');
         $redirectUrl = $redirectUrl['value'];
 
@@ -288,7 +271,7 @@ class Client {
 
         self::AssertHttpCode('Login failed at phase 3, error code {code}', $resultHttpCode);
         
-        $resultHeaders = self::GetHeadersFromCurlResponse($resultData);
+        $resultHeaders = self::GetHeadersFromHttpResponse($resultData);
 
         $genesisAuthFrontendCookieName = '_genesis_auth_frontend_session';
         $setCookieHeader = self::GetHeaderFromHeaderArray($resultHeaders, 'Set-Cookie', $genesisAuthFrontendCookieName);
@@ -327,7 +310,7 @@ class Client {
 
         self::AssertHttpCode('Login failed at phase 4, error code {code}', $resultHttpCode);
 
-        $resultHeaders = self::GetHeadersFromCurlResponse($resultData);
+        $resultHeaders = self::GetHeadersFromHttpResponse($resultData);
         $redirectUrl = self::GetHeaderFromHeaderArray($resultHeaders, 'Location');
         $redirectUrl = $redirectUrl['value'];
 
@@ -341,9 +324,11 @@ class Client {
 
         self::AssertHttpCode('Login failed at phase 5, error code {code}', $resultHttpCode);
 
-        $resultHeaders = self::GetHeadersFromCurlResponse($resultData);
-        $redirectUrl = self::GetHeaderFromHeaderArray($resultHeaders, 'Location');
-        $redirectUrl = $redirectUrl['value'];
+        $resultHeaders = self::GetHeadersFromHttpResponse($resultData);
+        $resultBody = self::GetResponseBodyFromHttpResponse($resultData);
+        $bounceUrlMatches = Array();
+        preg_match('#window\.location\.href \= \"(.+)\"#', $resultBody, $bounceUrlMatches);
+        $redirectUrl = $bounceUrlMatches[1];
 
         // Phase 6: get "bounce" page
         self::ExecuteCurlQuery(
@@ -355,25 +340,36 @@ class Client {
 
         self::AssertHttpCode('Login failed at phase 6, error code {code}', $resultHttpCode);
 
-        $resultHeaders = self::GetHeadersFromCurlResponse($resultData);
+        $resultHeaders = self::GetHeadersFromHttpResponse($resultData);
         $redirectUrl = self::GetHeaderFromHeaderArray($resultHeaders, 'Location');
         $redirectUrl = $redirectUrl['value'];
 
         $kharmaSessionSetCookieHeader = self::GetHeaderFromHeaderArray($resultHeaders, 'Set-Cookie', self::TOKEN_COOKIE_NAME);
         if ($kharmaSessionSetCookieHeader == null)
-            throw new AssetStoreException(self::TOKEN_COOKIE_NAME . ' cookie not found');
+            throw new AssetStoreException(self::TOKEN_COOKIE_NAME . ' cookie not found (phase 6)');
 
         $kharmaSessionParsedCookie = self::ParseCookies($kharmaSessionSetCookieHeader['value']);
         $kharmaSession = @urldecode($kharmaSessionParsedCookie[0][self::TOKEN_COOKIE_NAME]);
-        $kharmaSession = trim($kharmaSession);
+        if ($kharmaSession == null)
+            throw new AssetStoreException(self::TOKEN_COOKIE_NAME . ' cookie could not be parsed (phase 6)');
 
+        $kharmaSession = trim($kharmaSession);
         return $kharmaSession;
     }
 
+    private function GetSimpleData($params, &$resultData, &$resultHttpCode) {
+        $params['cookies'] = $this->cookies;
+        return self::ExecuteCurlQuery($params, $resultData, $resultHttpCode);
+    }
+
     private function AssertIsNotLoggedIn() {
-        if ($this->IsLoggedIn()) {
-            throw new AssetStoreException('Login already performed');
-        }
+        if ($this->IsLoggedIn())
+            throw new AssetStoreException('Login already performed, can\'t login multiple times');
+    }
+  
+    private function AssertIsLoggedIn() {
+        if (!$this->IsLoggedIn())
+            throw new AssetStoreException('Can\'t execute operation when not logged in');
     }
 
     private static function AssertHttpCode($message, $code) {
@@ -389,21 +385,6 @@ class Client {
 
         throw new AssetStoreException(str_replace('{code}', $code . ' (' . $httpStatusMmessage . ')', $message), $code);
     }
-  
-    private function AssertIsLoggedIn() {
-        if (!$this->IsLoggedIn()) {
-            throw new AssetStoreException('Can\'t execute operation when not logged in');
-        }
-    }
-
-    private static function GetHeaderFromHeaderArray($cookieArray, $cookieKey, $cookieValueStart = null) {
-        foreach ($cookieArray as $value) {
-            if ($value['key'] == $cookieKey && ($cookieValueStart == null || strpos($value['value'], $cookieValueStart) === 0))
-                return $value;
-        }
-
-        return null;
-    }
 
     private static function ExecuteCurlQuery($params, &$resultData, &$resultHttpCode) {
         $ch = self::SetupCurlQueryInternal($params); 
@@ -412,7 +393,7 @@ class Client {
         $resultHttpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
         curl_close($ch);
         if (!empty($curlError))
-            throw new AssetStoreException("CURL error occured: {$curlError}");
+            throw new AssetStoreException("cURL error occured: {$curlError}");
     }
 
     private static function SetupCurlQueryInternal($params) {
@@ -445,7 +426,16 @@ class Client {
         return $ch;
     }
 
-    private static function GetHeadersFromCurlResponse($response) {
+    private static function GetHeaderFromHeaderArray($cookieArray, $cookieKey, $cookieValueStart = null) {
+        foreach ($cookieArray as $value) {
+            if ($value['key'] == $cookieKey && ($cookieValueStart == null || strpos($value['value'], $cookieValueStart) === 0))
+                return $value;
+        }
+
+        return null;
+    }
+
+    private static function GetHeadersFromHttpResponse($response) {
         $headers = array();
         $headerText = substr($response, 0, strpos($response, "\r\n\r\n"));
     
@@ -460,6 +450,10 @@ class Client {
         }
     
         return $headers;
+    }
+
+    private static function GetResponseBodyFromHttpResponse($response) {
+        return substr($response, strpos($response, "\r\n\r\n"));
     }
 
     // https://gist.github.com/pokeb/10590
