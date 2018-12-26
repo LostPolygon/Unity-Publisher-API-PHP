@@ -18,6 +18,8 @@ Not implemented:
 * Viewing/saving payout credentials
 * Viewing/saving publisher info
 
+Requires PHP 5.4, php_json extension, and remote socket access.
+
 Usage examples:
 
 [Purchases E-mail Notifier](https://gist.github.com/ZimM-LostPolygon/280d031052293679ef54)
