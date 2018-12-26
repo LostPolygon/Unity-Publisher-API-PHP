@@ -18,11 +18,14 @@ class Client {
     const USER_AGENT = 'Mozilla/5.0 (Windows NT 6.3; rv:27.0) Gecko/20100101 Firefox/27.0';
     const TOKEN_COOKIE_NAME = 'kharma_session';
 
+    const TFA_CODE_REQUESTED = 'TFA_CODE_REQUESTED';
+
     private $loginToken;
     private $isLoggedIn = false;
     private $cookies = Array();
     private $userInfoOverview = null;
     private $publisherInfoOverview = null;
+    private $tfaResumeData = null;
 
     public function LoginWithToken($token) {
         $this->AssertIsNotLoggedIn();
@@ -32,10 +35,14 @@ class Client {
         $this->cookies[self::TOKEN_COOKIE_NAME] = $this->loginToken;
     }
 
-    public function Login($user, $password) {
+    public function Login($user, $password, $tfaResumeData = null, $tfaCode = null) {
         $this->AssertIsNotLoggedIn();
 
-        $token = $this->GetLoginToken($user, $password);
+        $token = $this->GetLoginToken($user, $password, $tfaResumeData, $tfaCode);
+        if ($token == self::TFA_CODE_REQUESTED) {
+            return self::TFA_CODE_REQUESTED;
+        }
+
         $this->LoginWithToken($token);
 
         return $token;
@@ -63,11 +70,15 @@ class Client {
         if ($this->userInfoOverview === null) {
             $result = $this->GetSimpleData(Array('url' => self::USER_OVERVIEW_JSON_URL), $resultData, $resultHttpCode);
             self::AssertHttpCode('Fetching user data failed, error code {code}', $resultHttpCode);
-    
-            $this->userInfoOverview = json_decode($resultData); 
+
+            $this->userInfoOverview = json_decode($resultData);
         }
 
         return $this->userInfoOverview;
+    }
+
+    public function GetTfaResumeData() {
+        return $this->tfaResumeData;
     }
 
     public function GetPublisherInfo() {
@@ -76,7 +87,7 @@ class Client {
         if ($this->publisherInfoOverview === null) {
             $result = $this->GetSimpleData(Array('url' => self::PUBLISHER_OVERVIEW_JSON_URL), $resultData, $resultHttpCode);
             self::AssertHttpCode('Fetching publisher data failed, error code {code}', $resultHttpCode);
-    
+
             $publisherInfoObject = json_decode($resultData);
             $this->publisherInfoOverview = new PublisherInfo($publisherInfoObject);
         }
@@ -158,8 +169,8 @@ class Client {
         }
 
         $month = str_pad($month, 2, '0', STR_PAD_LEFT);
-        $url = str_replace(Array('{publisherId}', '{year}', '{month}'), 
-                           Array($this->GetPublisherInfo()->GetId(), $year, $month), 
+        $url = str_replace(Array('{publisherId}', '{year}', '{month}'),
+                           Array($this->GetPublisherInfo()->GetId(), $year, $month),
                            self::SALES_JSON_URL);
         $result = $this->GetSimpleData(Array('url' => $url), $resultData, $resultHttpCode);
         self::AssertHttpCode('Fetching sales failed, error code {code}', $resultHttpCode);
@@ -189,8 +200,8 @@ class Client {
         }
 
         $month = str_pad($month, 2, '0', STR_PAD_LEFT);
-        $url = str_replace(Array('{publisherId}', '{year}', '{month}'), 
-                           Array($this->GetPublisherInfo()->GetId(), $year, $month), 
+        $url = str_replace(Array('{publisherId}', '{year}', '{month}'),
+                           Array($this->GetPublisherInfo()->GetId(), $year, $month),
                            self::DOWNLOADS_JSON_URL);
         $result = $this->GetSimpleData(Array('url' => $url), $resultData, $resultHttpCode);
         self::AssertHttpCode('Fetching downloads failed, error code {code}', $resultHttpCode);
@@ -218,7 +229,7 @@ class Client {
         unset($value);
         $invoiceNumbers = implode(',', $invoiceNumbers);
         $url = str_replace(Array('{publisherId}', '{invoiceId}'),
-                           Array($this->GetPublisherInfo()->GetId(), urlencode($invoiceNumbers)), 
+                           Array($this->GetPublisherInfo()->GetId(), urlencode($invoiceNumbers)),
                            self::INVOICE_VERIFY_JSON_URL);
         $result = $this->GetSimpleData(Array('url' => $url), $resultData, $resultHttpCode);
         self::AssertHttpCode('Invoice verification failed, error code {code}', $resultHttpCode);
@@ -232,105 +243,165 @@ class Client {
         return $invoiceInfo;
     }
 
-    private function GetLoginToken($user, $password) {
-        // Phase 1: get Unity authorize redirect URL
-        self::ExecuteCurlQuery(
-                Array('url' => self::SALES_URL,
-                      'getHeaders' => true),
-                $resultData,
-                $resultHttpCode
-            );
-
-        self::AssertHttpCode('Login failed at phase 1, error code {code}', $resultHttpCode);
-
-        $resultHeaders = self::GetHeadersFromHttpResponse($resultData);
-        $redirectUrl = self::GetHeaderFromHeaderArray($resultHeaders, 'Location');
-        $redirectUrl = $redirectUrl['value'];
-
-        // Phase 2: get Unity ID redirect URL
-        self::ExecuteCurlQuery(
-                Array('url' => $redirectUrl,
-                      'getHeaders' => true),
-                $resultData,
-                $resultHttpCode
-            );
-
-        self::AssertHttpCode('Login failed at phase 2, error code {code}', $resultHttpCode);
-
-        $resultHeaders = self::GetHeadersFromHttpResponse($resultData);
-        $redirectUrl = self::GetHeaderFromHeaderArray($resultHeaders, 'Location');
-        $redirectUrl = $redirectUrl['value'];
-
-        // Phase 3: load Unity ID authorization page
-        self::ExecuteCurlQuery(
-                Array('url' => $redirectUrl,
-                      'getHeaders' => true),
-                $resultData,
-                $resultHttpCode
-            );
-
-        self::AssertHttpCode('Login failed at phase 3, error code {code}', $resultHttpCode);
-        
-        $resultHeaders = self::GetHeadersFromHttpResponse($resultData);
-
+    private function GetLoginToken($user, $password, $tfaResumeData, $tfaCode) {
         $genesisAuthFrontendCookieName = '_genesis_auth_frontend_session';
-        $setCookieHeader = self::GetHeaderFromHeaderArray($resultHeaders, 'Set-Cookie', $genesisAuthFrontendCookieName);
 
-        $parsedCookie = self::ParseCookies($setCookieHeader['value']);
-        $genesisAuthFrontendCookieValue = @urldecode($parsedCookie[0][$genesisAuthFrontendCookieName]);
-        if ($genesisAuthFrontendCookieValue == null)
-            throw new AssetStoreException($genesisAuthFrontendCookieName . ' cookie not found (phase 3)');
+        if ($tfaResumeData == null) {
+            // Phase 1: get Unity authorize redirect URL
+            self::ExecuteCurlQuery(
+                    Array('url' => self::SALES_URL,
+                          'getHeaders' => true),
+                    $resultData,
+                    $resultHttpCode
+                );
 
-        // Get authenticity token from HTML
-        $authenticityTokenMatches = Array();
-        preg_match('#<input type="hidden" name="authenticity_token" value="(.+)" />#', $resultData, $authenticityTokenMatches);
-        $authenticityToken = @$authenticityTokenMatches[1];
-        if ($authenticityToken == null)
-            throw new AssetStoreException('Page authenticity token not found (phase 3)');
+            self::AssertHttpCode('Login failed at phase 1, error code {code}', $resultHttpCode);
 
-        // Phase 4: send login data and get authorization URL
-        $loginQuery = Array(
+            $resultHeaders = self::GetHeadersFromHttpResponse($resultData);
+            $redirectUrl = self::GetHeaderFromHeaderArray($resultHeaders, 'Location');
+            $redirectUrl = $redirectUrl['value'];
+
+            // Phase 2: get Unity ID redirect URL
+            self::ExecuteCurlQuery(
+                    Array('url' => $redirectUrl,
+                          'getHeaders' => true),
+                    $resultData,
+                    $resultHttpCode
+                );
+
+            self::AssertHttpCode('Login failed at phase 2, error code {code}', $resultHttpCode);
+
+            $resultHeaders = self::GetHeadersFromHttpResponse($resultData);
+            $redirectUrl = self::GetHeaderFromHeaderArray($resultHeaders, 'Location');
+            $redirectUrl = $redirectUrl['value'];
+
+            // Phase 3: load Unity ID authorization page
+            self::ExecuteCurlQuery(
+                    Array('url' => $redirectUrl,
+                          'getHeaders' => true),
+                    $resultData,
+                    $resultHttpCode
+                );
+
+            self::AssertHttpCode('Login failed at phase 3, error code {code}', $resultHttpCode);
+
+            $resultHeaders = self::GetHeadersFromHttpResponse($resultData);
+
+            $setCookieHeader = self::GetHeaderFromHeaderArray($resultHeaders, 'Set-Cookie', $genesisAuthFrontendCookieName);
+
+            $parsedCookie = self::ParseCookies($setCookieHeader['value']);
+            $genesisAuthFrontendCookieValue = @urldecode($parsedCookie[0][$genesisAuthFrontendCookieName]);
+            if ($genesisAuthFrontendCookieValue == null)
+                throw new AssetStoreException($genesisAuthFrontendCookieName . ' cookie not found (phase 3)');
+
+            // Get authenticity token from HTML
+            $authenticityTokenMatches = Array();
+            preg_match('#<input type="hidden" name="authenticity_token" value="(.+)" />#', $resultData, $authenticityTokenMatches);
+            $authenticityToken = @$authenticityTokenMatches[1];
+            if ($authenticityToken == null)
+                throw new AssetStoreException('Page authenticity token not found (phase 3)');
+
+            // Phase 4: send login data and get authorization URL
+            $loginQuery = Array(
+                    'utf8' => '✓',
+                    '_method' => 'put',
+                    'authenticity_token' => $authenticityToken,
+                    'conversations_create_session_form[email]' => $user,
+                    'conversations_create_session_form[password]' => $password,
+                    'conversations_create_session_form[remember_me]' => 'true',
+                    'commit' => 'Log in'
+                );
+
+            self::ExecuteCurlQuery(
+                    Array('url' => $redirectUrl,
+                          'query' => $loginQuery,
+                          'cookies' => Array($genesisAuthFrontendCookieName => $genesisAuthFrontendCookieValue),
+                          'getHeaders' => true),
+                    $resultData,
+                    $resultHttpCode
+                );
+
+            self::AssertHttpCode('Login failed at phase 4, error code {code}', $resultHttpCode);
+
+            $resultHeaders = self::GetHeadersFromHttpResponse($resultData);
+            $redirectUrl = self::GetHeaderFromHeaderArray($resultHeaders, 'Location');
+            $redirectUrl = $redirectUrl['value'];
+
+            // Phase 5: get "bounce" page URL
+            self::ExecuteCurlQuery(
+                    Array('url' => $redirectUrl,
+                          'getHeaders' => true),
+                    $resultData,
+                    $resultHttpCode
+                );
+
+            self::AssertHttpCode('Login failed at phase 5, error code {code}', $resultHttpCode);
+
+            $resultHeaders = self::GetHeadersFromHttpResponse($resultData);
+            $resultBody = self::GetResponseBodyFromHttpResponse($resultData);
+
+            // Phase 6: check for TFA page
+            if (strpos($resultBody, 'conversations_email_tfa_required_form[resend]') !== false) {
+                $tfaFormActionMatches = Array();
+                preg_match('#id="new_conversations_email_tfa_required_form" action="(.+?)"#', $resultBody, $tfaFormActionMatches);
+                $this->tfaResumeData = Array (
+                    'tfaFormAction' => 'https://id.unity.com' . $tfaFormActionMatches[1],
+                    'cookies' => Array($genesisAuthFrontendCookieName => $genesisAuthFrontendCookieValue),
+                    'authenticityToken' => $authenticityToken
+                );
+                return self::TFA_CODE_REQUESTED;
+            }
+        } else {
+            // Phase 7: enter TFA code
+            $genesisAuthFrontendCookieValue = $tfaResumeData['cookies'][$genesisAuthFrontendCookieName];
+            $authenticityToken = $tfaResumeData['authenticityToken'];
+
+            $tfaQuery = Array(
                 'utf8' => '✓',
                 '_method' => 'put',
                 'authenticity_token' => $authenticityToken,
-                'conversations_create_session_form[email]' => $user,
-                'conversations_create_session_form[password]' => $password,
-                'conversations_create_session_form[remember_me]' => 'true',
-                'commit' => 'Log in'
+                'conversations_email_tfa_required_form[code]' => $tfaCode,
+                'commit' => 'Verify'
             );
 
-        self::ExecuteCurlQuery(
-                Array('url' => $redirectUrl,
-                      'query' => $loginQuery,
+            self::ExecuteCurlQuery(
+                Array('url' => $tfaResumeData['tfaFormAction'],
+                      'query' => $tfaQuery,
                       'cookies' => Array($genesisAuthFrontendCookieName => $genesisAuthFrontendCookieValue),
                       'getHeaders' => true),
                 $resultData,
                 $resultHttpCode
             );
 
-        self::AssertHttpCode('Login failed at phase 4, error code {code}', $resultHttpCode);
+            self::AssertHttpCode('Login failed at phase 7, error code {code}', $resultHttpCode);
 
-        $resultHeaders = self::GetHeadersFromHttpResponse($resultData);
-        $redirectUrl = self::GetHeaderFromHeaderArray($resultHeaders, 'Location');
-        $redirectUrl = $redirectUrl['value'];
+            $resultHeaders = self::GetHeadersFromHttpResponse($resultData);
+            $resultBody = self::GetResponseBodyFromHttpResponse($resultData);
 
-        // Phase 5: get "bounce" page URL
-        self::ExecuteCurlQuery(
+            $redirectUrl = self::GetHeaderFromHeaderArray($resultHeaders, 'Location');
+            $redirectUrl = $redirectUrl['value'];
+
+            // Phase 8: get "bounce" page
+            self::ExecuteCurlQuery(
                 Array('url' => $redirectUrl,
                       'getHeaders' => true),
                 $resultData,
                 $resultHttpCode
             );
 
-        self::AssertHttpCode('Login failed at phase 5, error code {code}', $resultHttpCode);
+            $resultHeaders = self::GetHeadersFromHttpResponse($resultData);
+            $resultBody = self::GetResponseBodyFromHttpResponse($resultData);
 
-        $resultHeaders = self::GetHeadersFromHttpResponse($resultData);
-        $resultBody = self::GetResponseBodyFromHttpResponse($resultData);
+            //var_dump($resultHeaders);
+            //var_dump($resultBody);
+        }
+
         $bounceUrlMatches = Array();
         preg_match('#window\.location\.href \= \"(.+)\"#', $resultBody, $bounceUrlMatches);
+
         $redirectUrl = $bounceUrlMatches[1];
 
-        // Phase 6: get "bounce" page
+        // Phase 8: get "bounce" page
         self::ExecuteCurlQuery(
                 Array('url' => $redirectUrl,
                       'getHeaders' => true),
@@ -338,7 +409,7 @@ class Client {
                 $resultHttpCode
             );
 
-        self::AssertHttpCode('Login failed at phase 6, error code {code}', $resultHttpCode);
+        self::AssertHttpCode('Login failed at phase 8, error code {code}', $resultHttpCode);
 
         $resultHeaders = self::GetHeadersFromHttpResponse($resultData);
         $redirectUrl = self::GetHeaderFromHeaderArray($resultHeaders, 'Location');
@@ -346,12 +417,12 @@ class Client {
 
         $kharmaSessionSetCookieHeader = self::GetHeaderFromHeaderArray($resultHeaders, 'Set-Cookie', self::TOKEN_COOKIE_NAME);
         if ($kharmaSessionSetCookieHeader == null)
-            throw new AssetStoreException(self::TOKEN_COOKIE_NAME . ' cookie not found (phase 6)');
+            throw new AssetStoreException(self::TOKEN_COOKIE_NAME . ' cookie not found (phase 8)');
 
         $kharmaSessionParsedCookie = self::ParseCookies($kharmaSessionSetCookieHeader['value']);
         $kharmaSession = @urldecode($kharmaSessionParsedCookie[0][self::TOKEN_COOKIE_NAME]);
         if ($kharmaSession == null)
-            throw new AssetStoreException(self::TOKEN_COOKIE_NAME . ' cookie could not be parsed (phase 6)');
+            throw new AssetStoreException(self::TOKEN_COOKIE_NAME . ' cookie could not be parsed (phase 8)');
 
         $kharmaSession = trim($kharmaSession);
         return $kharmaSession;
@@ -366,7 +437,7 @@ class Client {
         if ($this->IsLoggedIn())
             throw new AssetStoreException('Login already performed, can\'t login multiple times');
     }
-  
+
     private function AssertIsLoggedIn() {
         if (!$this->IsLoggedIn())
             throw new AssetStoreException('Can\'t execute operation when not logged in');
@@ -387,7 +458,7 @@ class Client {
     }
 
     private static function ExecuteCurlQuery($params, &$resultData, &$resultHttpCode) {
-        $ch = self::SetupCurlQueryInternal($params); 
+        $ch = self::SetupCurlQueryInternal($params);
         $resultData = curl_exec($ch);
         $curlError = curl_error($ch);
         $resultHttpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
@@ -421,7 +492,7 @@ class Client {
         }
         curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
         curl_setopt($ch, CURLOPT_REFERER, isset($params['referer']) ? $params['referer'] : $params['url']);
-        curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);  
+        curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
 
         return $ch;
     }
@@ -438,7 +509,7 @@ class Client {
     private static function GetHeadersFromHttpResponse($response) {
         $headers = array();
         $headerText = substr($response, 0, strpos($response, "\r\n\r\n"));
-    
+
         foreach (explode("\r\n", $headerText) as $i => $line) {
             if ($i === 0) {
                 // HTTP response code, ignore
@@ -448,7 +519,7 @@ class Client {
                 $headers[] = Array('key' => $key, 'value' => $value);
             }
         }
-    
+
         return $headers;
     }
 
@@ -484,7 +555,7 @@ class Client {
                 $cookies[] = $cookie;
                 $cookie = Array();
             }
-            
+
             $key = $newKey;
         }
 
@@ -527,7 +598,7 @@ trait ConvertableObject {
     protected static function ObjectToArray($object) {
         $reflected = new \ReflectionClass($object);
         $data = Array();
-    
+
         $methods = $reflected->getMethods();
         foreach ($methods as $method) {
             if (strpos($method->name, "Get") !== 0 || !$method->isPublic() || $method->isStatic())
@@ -537,25 +608,25 @@ trait ConvertableObject {
             $name[0] = strtolower($name[0]);
             $value = $method->invoke($object);
             $valueType = gettype($value);
-    
+
             switch ($valueType) {
                 case 'object':
                     $value = self::ObjectToArray($value);
                     break;
-                
+
                 case 'array':
                     $valueArray = Array();
                     foreach($value as $arrayElement){
                         $valueArray[] = self::ObjectToArray($arrayElement);
                     }
-    
+
                     $value = $valueArray;
                     break;
             }
-    
+
             $data[$name] = $value;
         }
-    
+
         return $data;
     }
 }
@@ -770,8 +841,8 @@ class PeriodSalesInfo {
 
         $this->revenueGross = 0;
         foreach ($this->packageSales as $value) {
-            $this->revenueGross += $value->GetPrice() * ($value->GetQuantity() - 
-                                                         $value->GetRefunds() - 
+            $this->revenueGross += $value->GetPrice() * ($value->GetQuantity() -
+                                                         $value->GetRefunds() -
                                                          $value->GetChargebacks());
         }
 
@@ -1101,15 +1172,15 @@ class HttpUtilities {
     // http://w-shadow.com/blog/2008/07/05/how-to-get-redirect-url-in-php/
     public static function GetRedirectUrl($url) {
         $redirect_url = null;
-     
+
         $url_parts = @parse_url($url);
         if (!$url_parts) return false;
         if (!isset($url_parts['host'])) return false; //can't process relative URLs
         if (!isset($url_parts['path'])) $url_parts['path'] = '/';
-          
+
         $sock = fsockopen($url_parts['host'], (isset($url_parts['port']) ? (int)$url_parts['port'] : 80), $errno, $errstr, 30);
         if (!$sock) return false;
-          
+
         $request = "HEAD " . $url_parts['path'] . (isset($url_parts['query']) ? '?'.$url_parts['query'] : '') . " HTTP/1.1\r\n";
         $request .= 'Host: ' . $url_parts['host'] . "\r\n";
         $request .= "Connection: Close\r\n\r\n";
@@ -1117,13 +1188,13 @@ class HttpUtilities {
         $response = '';
         while(!feof($sock)) $response .= fread($sock, 8192);
         fclose($sock);
-     
+
         if (preg_match('/^Location: (.+?)$/m', $response, $matches)) {
             if (substr($matches[1], 0, 1) == "/")
                 return $url_parts['scheme'] . "://" . $url_parts['host'] . trim($matches[1]);
             else
                 return trim($matches[1]);
-      
+
         } else {
             return false;
         }
